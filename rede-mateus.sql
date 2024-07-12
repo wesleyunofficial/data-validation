@@ -10,4 +10,4 @@ FROM  brewdat_uc_saz_prod.gld_saz_sales_rede_mateus.sellout
 WHERE 1=1
 AND DATA == '2024-06-01' 
 AND DESCPRODUTO == 'OUTROS 1L'
-AND CNPJ == '3995515017647'
+AND CNPJ == '3995515017647';
