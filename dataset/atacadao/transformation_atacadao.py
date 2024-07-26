@@ -58,7 +58,7 @@ class Sales(Transformation):
         
         current_date = current_datetime.date() - timedelta(weeks=1)        
 
-        df_atacadao_sales = spark.table("brewdat_uc_saz_prod.brz_saz_sales_atacadao.br_sales")    
+        df_atacadao_sales = spark.table("brewdat_uc_saz_prod.brz_saz_sales_atacadao.br_sales")
 
         # Add new column ingestion date with the year, month and day
         df_atacadao_sales = (
