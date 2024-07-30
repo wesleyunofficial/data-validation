@@ -15,15 +15,14 @@ from pyspark.sql import DataFrame
 from pyspark.sql.functions import (
     col,
     concat_ws,
-    count,
     from_unixtime,
     lit,
     max,
-    row_number,
-    to_date,    
+    to_date,
     unix_timestamp,
-    when
+    when,
 )
+
 
 # Main class for your transformation
 class Sellout(Transformation):
@@ -46,19 +45,30 @@ class Sellout(Transformation):
         Returnes:
             _type_: bool
         """
-        dates = [date(2024, 7, 25), date(2024, 7, 26)]
+        dates = [date(2024, 7, 29), date(2024, 7, 30), date(2024, 7, 31)]
 
         if current_datetime.date() in dates:
             return True
         else:
-            return False        
+            return False
 
-    def extract_silver_neogrid_sales(
+    def extract_silver_neogrid_sellout(
         self, current_datetime, is_first_execution
     ) -> DataFrame:
+        """Return PySpark DataFrame with sellout data from the brewdat_uc_saz_prod.slv_saz_sales_neogrid.br_sellout.
 
+        Args:
+            current_datetime (datetime): Current datetime.
+            is_first_execution (bool): Flag indicating if it's the first execution.
+
+        Returns:
+            DataFrame: PySpark DataFrame.
+        """
+
+        # Calculate the date for the previous day
         current_date = current_datetime.date() - timedelta(days=1)
 
+        # Get the DataFrame from the specified table
         df_neogrid_sellout = self.get_table(
             "brewdat_uc_saz_prod.slv_saz_sales_neogrid.br_sellout"
         )
@@ -69,80 +79,153 @@ class Sellout(Transformation):
             concat_ws("-", col("year"), col("month"), col("day")).cast("date"),
         )
 
-        # Verify if is the first execution then return the whole dataframe else filter by ingestion_date
+        # If it's the first execution, return the whole DataFrame
         if is_first_execution:
             return df_neogrid_sellout
         else:
+            # Otherwise, filter the DataFrame by 'ingestion_date'
             df_neogrid_sellout = df_neogrid_sellout.where(
                 df_neogrid_sellout.ingestion_date == current_date
             )
 
             return df_neogrid_sellout
 
-    def select_columns_neogrid_sales(self, df_neogrid_sellout) -> DataFrame:
+    def extract_gold_neogrid_sellout(self) -> DataFrame:
+        """Return PySpark DataFrame with sellout data from the brewdat_uc_saz_prod.gld_br_sales_sellout_neogrid.sellout.
 
-        """ 
+        Returns:
+            DataFrame: PySpark DataFrame.
         """
 
-        # rename all columns to upper case
+        df_gold_neogrid_sellout = self.get_table(
+            "brewdat_uc_saz_prod.gld_br_sales_sellout_neogrid.sellout"
+        )
+
+        return df_gold_neogrid_sellout
+
+    def select_columns_neogrid_sellout(self, df_neogrid_sellout) -> DataFrame:
+
+        """
+        Processes the given DataFrame by renaming columns to uppercase,
+        filtering out specific rows, and formatting the 'DIA' column as a date.
+
+        Args:
+            df_neogrid_sellout (DataFrame): Input DataFrame containing sellout data.
+
+        Returns:
+            DataFrame: Processed DataFrame with renamed columns, filtered rows,
+                    and formatted 'DIA' column.
+        """
+
+        # Drop Columns year, month and day
+        df_neogrid_sellout = df_neogrid_sellout.drop("year", "month", "day")
+
+        # Rename all columns to upper case
         for column in df_neogrid_sellout.columns:
-            df_neogrid_sellout = df_neogrid_sellout.withColumnRenamed(column, column.upper())
+            df_neogrid_sellout = df_neogrid_sellout.withColumnRenamed(
+                column, column.upper()
+            )
 
-        df_neogrid_sellout = df_neogrid_sellout.where(col("DIA") != 'Dia')
+        # Filter out rows where the 'DIA' column has the value 'Dia'
+        df_neogrid_sellout = df_neogrid_sellout.where(col("DIA") != "Dia")
 
+        # Convert 'DIA' column to a date format, handling different input formats
         df_neogrid_sellout = df_neogrid_sellout.withColumn(
             "DIA",
             when(
                 to_date(
                     from_unixtime(unix_timestamp(df_neogrid_sellout.DIA, "yyyy-MM-dd"))
                 ).isNotNull(),
-                to_date(from_unixtime(unix_timestamp(df_neogrid_sellout.DIA, "yyyy-MM-dd"))),
+                to_date(
+                    from_unixtime(unix_timestamp(df_neogrid_sellout.DIA, "yyyy-MM-dd"))
+                ),
             )
             .when(
                 to_date(
                     from_unixtime(unix_timestamp(df_neogrid_sellout.DIA, "dd/MM/yyyy"))
                 ).isNotNull(),
-                to_date(from_unixtime(unix_timestamp(df_neogrid_sellout.DIA, "dd/MM/yyyy"))),
+                to_date(
+                    from_unixtime(unix_timestamp(df_neogrid_sellout.DIA, "dd/MM/yyyy"))
+                ),
             )
             .otherwise("1900-01-01"),
         )
 
         return df_neogrid_sellout
-    
-    def transformation_in_source(self, df_neogrid_sellout) -> DataFrame:
 
+    def apply_transformation(self, df_neogrid_sellout) -> DataFrame:
+
+        """
+        Apply various transformations to the input DataFrame.
+        - drop duplicates values
+        - filter rows with Sale Quantity Unit and Stock Quantity Unit
+        - filter max ingestion date
+
+        Args:
+            df_neogrid_sellout (DataFrame): Input PySpark DataFrame to be transformed.
+
+        Returns:
+            DataFrame: Transformed PySpark DataFrame.
+        """
+
+        # Drop duplicate rows from the DataFrame
         df_transformed_neogrid_sellout = df_neogrid_sellout.dropDuplicates()
 
-        df_transformed_neogrid_sellout = (
-                df_transformed_neogrid_sellout.filter(
-                        (df_transformed_neogrid_sellout.QUANTIDADE_VENDA_UNIDADE > lit('0,00')) |
-                        (df_transformed_neogrid_sellout.QUANTIDADE_ESTOQUE_UNIDADE >= lit('0,00'))
-                    )
-                )
-        
-        window = (
-        Window.partitionBy([
-                col("CODIGO_VAREJO"), 
-                col("DIA"), 
-                col("CNPJ"), 
-                col("EAN_PRODUTO_VAREJO"), 
-                col("DESCRICAO_PRODUTO_VAREJO")
-            ]).orderBy(col("ingestion_date").desc())
+        # Filter rows where either QUANTIDADE_VENDA_UNIDADE is greater than '0,00'
+        # or QUANTIDADE_ESTOQUE_UNIDADE is greater than or equal to '0,00'
+        df_transformed_neogrid_sellout = df_transformed_neogrid_sellout.filter(
+            (df_transformed_neogrid_sellout.QUANTIDADE_VENDA_UNIDADE > lit("0,00"))
+            | (df_transformed_neogrid_sellout.QUANTIDADE_ESTOQUE_UNIDADE >= lit("0,00"))
         )
+        # Define a window specification for partitioning and ordering the ingestion_date
+        window = Window.partitionBy(
+            [
+                col("CODIGO_VAREJO"),
+                col("DIA"),
+                col("CNPJ"),
+                col("EAN_PRODUTO_VAREJO"),
+                col("DESCRICAO_PRODUTO_VAREJO"),
+            ]
+        ).orderBy(col("ingestion_date").desc())
 
+        # Add new column with the max ingestion date
         df_transformed_neogrid_sellout = df_transformed_neogrid_sellout.withColumn(
             "max_ingestion_date", max(col("ingestion_date")).over(window)
         )
 
+        # Filter by max ingestion date
         df_transformed_neogrid_sellout = df_transformed_neogrid_sellout.where(
-            col("ingestion_date") == col("ingestion_date_max")
+            col("ingestion_date") == col("max_ingestion_date")
         )
 
+        # Drop column max ingestion date
         df_transformed_neogrid_sellout = df_transformed_neogrid_sellout.drop(
             col("max_ingestion_date")
         )
 
         return df_transformed_neogrid_sellout
+
+    def merge_dataframes(
+        self, df_gold_neogrid_sellout, df_silver_neogrid_sellout
+    ) -> DataFrame:
+        """
+        Merges two PySpark DataFrames containing Neogrid sellout data.
+
+        This function takes two DataFrames as input and merges them using the `union` operation.
+        The resulting DataFrame contains all rows from both input DataFrames.
+
+        Args:
+            df_gold_neogrid_sellout (DataFrame): The first DataFrame to be merged.
+            df_silver_neogrid_sellout (DataFrame): The second DataFrame to be merged.
+
+        Returns:
+            DataFrame: A merged PySpark DataFrame containing all rows from both input DataFrames.
+        """
+        df_merged_neogrid_sellout = df_gold_neogrid_sellout.union(
+            df_silver_neogrid_sellout
+        )
+
+        return df_merged_neogrid_sellout
 
     # This method is mandatory and the final transformation of your dataframe must be returned here
     def definitions(self):
@@ -153,16 +236,49 @@ class Sellout(Transformation):
 
         if is_first_execution:
 
-            # extract
-            df_extracted_atacadao_sales = self.extract_silver_neogrid_sales(
+            # Extract data from source (silver layer)
+            df_extracted_neogrid_sellout = self.extract_silver_neogrid_sellout(
                 current_datetime, True
             )
 
-            df_selected_atacadao_sales = self.select_columns_neogrid_sales(
-                df_extracted_atacadao_sales)
+            # Select columns, verify null values and rename columns
+            df_selected_neogrid_sellout = self.select_columns_neogrid_sellout(
+                df_extracted_neogrid_sellout
+            )
 
-        # Apply your transformation and return your final dataframe
-        return df_extracted_atacadao_sales, df_selected_atacadao_sales
+            # Apply transformation (drop duplicates)
+            final_dataframe = self.apply_transformation(df_selected_neogrid_sellout)
+        else:
+            # Extract data from destination (gold layer)
+            df_gold_neogrid_sellout = self.extract_gold_neogrid_sellout()
+
+            # Extract data from source (silver layer)
+            df_extracted_neogrid_sellout = self.extract_silver_neogrid_selout(
+                current_datetime, False
+            )
+
+            # Select columns, verify null values and rename columns
+            df_selected_neogrid_sellout = self.select_columns_neogrid_sellout(
+                df_extracted_neogrid_sellout
+            )
+
+            # Merge dataframes silver (source) and gold (destination)
+            df_merged_neogrid_sellout = self.merge_dataframes(
+                df_gold_neogrid_sellout, df_selected_neogrid_sellout
+            )
+
+            # Apply transformation (drop duplicates)
+            final_dataframe = self.apply_transformation(df_merged_neogrid_sellout)
+
+        return final_dataframe
+
+
+# Call brewdat TaskEntryPoint to handle transformation and load the data
+# context = json.loads(dbutils.widgets.get("context"))
+# task_entry_point = TaskEntryPoint(context=context, transformation_object=Sellout())
+# task = task_entry_point.handle()
+# task.run()
+
 
 # COMMAND ----------
 
@@ -170,34 +286,16 @@ sellout_task = Sellout()
 
 # COMMAND ----------
 
-df_extracted, df_selected = sellout_task.definitions()
+df_transformed = sellout_task.definitions()
 
 # COMMAND ----------
 
-df_selected.count()
-
-# COMMAND ----------
-
-
-
-# COMMAND ----------
-
-df_selected.count()
+df_transformed.count()
 
 # COMMAND ----------
 
 
-
-# COMMAND ----------
-
-
-
-
-
-# COMMAND ----------
-
-
-
+df_transformed.groupBy("DIA").agg(count("*").alias("contador")).display()
 
 # COMMAND ----------
 
@@ -219,12 +317,35 @@ df_selected.groupBy(col("CODIGO_VAREJO"),
 
 # COMMAND ----------
 
-df_selected.where("""
+df_row1 = df_transformed.where("""
                   CODIGO_VAREJO == 864 AND 
                   DIA == '2024-06-28' AND 
                   CNPJ == '05789313000780' AND 
                   EAN_PRODUTO_VAREJO == '7891991298476'
-                  """).display()
+                  AND CAUSA_RAIZ_OSA == "PBE"
+                  """)
+
+# COMMAND ----------
+
+df_row2 = df_transformed.where("""
+                  CODIGO_VAREJO == 864 AND 
+                  DIA == '2024-06-28' AND 
+                  CNPJ == '05789313000780' AND 
+                  EAN_PRODUTO_VAREJO == '7891991298476'
+                  AND CAUSA_RAIZ_OSA IS NULL
+                  """)
+
+# COMMAND ----------
+
+for c in columns:
+    comparisons = comparisons.withColumn(
+        f"{c}_equal", 
+        col(f"1_{c}") == col(f"2_{c}")
+    )
+
+# COMMAND ----------
+
+comparisons.display()
 
 # COMMAND ----------
 
@@ -297,3 +418,9 @@ spark.sql(f"""
 # COMMAND ----------
 
 
+
+# COMMAND ----------
+
+# MAGIC %environment
+# MAGIC "client": "1"
+# MAGIC "base_environment": ""
