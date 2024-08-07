@@ -404,3 +404,9 @@ for column in df.columns:
 # COMMAND ----------
 
 
+
+# COMMAND ----------
+
+# MAGIC %environment
+# MAGIC "client": "1"
+# MAGIC "base_environment": ""
