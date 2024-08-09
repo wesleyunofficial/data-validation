@@ -8,21 +8,13 @@ from datetime import date, datetime, timedelta
 from pytz import timezone
 from pyspark.sql import DataFrame
 from pyspark.sql.window import Window
-from pyspark.sql.functions import (col,
-                                   concat_ws,
-                                   count,
-                                   max,
-                                   row_number,
-                                   when)
+from pyspark.sql.functions import col, concat_ws, max, when
 
 
 # Main class for your transformation
 class Sales(Transformation):
     def __init__(self):
-        super().__init__(
-            dependencies = [
-            ]
-        )
+        super().__init__(dependencies=[])
 
     def get_datetime(self) -> datetime:
         """
@@ -33,15 +25,14 @@ class Sales(Transformation):
         time_zone = timezone("America/Sao_Paulo")
         current_datetime = datetime.now(tz=time_zone)
         return current_datetime
-    
+
     def is_first_execution_by_date(self, current_datetime) -> bool:
         """
             Check if is the first_execution verifing if dates are equals.
         Returnes:
             _type_: bool
         """
-        dates = [date(2024, 7, 18), 
-                 date(2024, 7, 19)]
+        dates = [date(2024, 7, 23), date(2024, 7, 24)]
 
         if current_datetime.date() in dates:
             return True
@@ -50,105 +41,119 @@ class Sales(Transformation):
 
     # Function to check for NaN and replace with None if NaN
     def check_nan(self, column):
-        return when(col(column) != 'NaN', col(column)).otherwise(None)
+        return when(col(column) != "NaN", col(column)).otherwise(None)
 
     def extract_silver_atacadao_sales(
         self, current_datetime, is_first_execution
-        ) -> DataFrame:
-        
+    ) -> DataFrame:
+
         current_date = current_datetime.date() - timedelta(weeks=1)        
 
-        df_atacadao_sales = spark.table("brewdat_uc_saz_prod.brz_saz_sales_atacadao.br_sales")
-
-        # Add new column ingestion date with the year, month and day
-        df_atacadao_sales = (
-            df_atacadao_sales
-                .withColumn("ingestion_date", concat_ws("-", 
-                                                        col("year"), 
-                                                        col("month"), 
-                                                        col("day")).cast("date"),
-                            )
-                        )
+        
 
         # Verify if is the first execution then return the whole dataframe else filter by ingestion_date
         if is_first_execution:
-            return df_atacadao_sales
-        else:
-            return df_atacadao_sales.where(
-                df_atacadao_sales.ingestion_date >= current_date
+            df_atacadao_sales = spark.table(
+                "brewdat_uc_saz_prod.brz_saz_sales_atacadao.br_sales"
             )
-            
+
+            # Add new column ingestion date with the year, month and day
+            df_atacadao_sales = df_atacadao_sales.withColumn(
+                "ingestion_date",
+                concat_ws("-", col("year"), col("month"), col("day")).cast("date"),
+            )
+        else:
+            df_atacadao_sales = spark.sql(
+                """
+                SELECT  *
+                FROM    brewdat_uc_saz_prod.slv_saz_sales_atacadao.br_sales slv 
+                JOIN
+                (
+                    -- return the last 4 ingestion dates
+                    SELECT  DISTINCT         
+                            cast(concat_ws("-", slv.year, slv.month, slv.day) as date) AS ingestion_date
+                    FROM    brewdat_uc_saz_prod.slv_saz_sales_atacadao.br_sales slv
+                    ORDER BY ingestion_date DESC
+                    LIMIT 4
+                ) AS tmp
+                ON cast(concat_ws("-", slv.year, slv.month, slv.day) as date) = tmp.ingestion_date                
+                """
+            )
+
+        return df_atacadao_sales 
+
     def select_columns_atacada_sales(self, df_atacadao_sales) -> DataFrame:
 
         df_atacadao_sales_columns = df_atacadao_sales.select("*")
 
-        # Apply the function to each column in the DataFrame 
+        # Apply the function to each column in the DataFrame
         for column in df_atacadao_sales_columns.columns:
             if column not in ["year", "month", "day", "ingestion_date"]:
-                df_atacadao_sales_columns = df_atacadao_sales_columns.withColumn(column, self.check_nan(column))
+                df_atacadao_sales_columns = df_atacadao_sales_columns.withColumn(
+                    column, self.check_nan(column)
+                )
 
-        df_atacadao_sales_columns = df_atacadao_sales_columns.drop("year", "month", "day")
-        
+        # Drop columns year, month and day
+        df_atacadao_sales_columns = df_atacadao_sales_columns.drop(
+            "year", "month", "day"
+        )
+
         # Rename columns name for uppercase
         df_atacadao_sales_columns = df_atacadao_sales_columns.toDF(
             *[c.strip().upper() for c in df_atacadao_sales_columns.columns]
-        )            
+        )
 
         return df_atacadao_sales_columns
-    
+
     def transformation_in_source(self, df_atacadao_sales) -> DataFrame:
-        
-        window = (
-                Window.partitionBy([
-                col("DATA"), 
-                col("CNPJ"), 
-                col("CODIGO_BARRA"), 
-                col("DESCRICAO")
-            ]).orderBy(col("ingestion_date").desc())
-        )
+
+        window = Window.partitionBy(
+            [col("DATA"), col("CNPJ"), col("CODIGO_BARRA"), col("DESCRICAO")]
+        ).orderBy(col("ingestion_date").desc())
 
         df_atacadao_sales_transformed = df_atacadao_sales.withColumn(
             "max_ingestion_date", max(col("ingestion_date")).over(window)
         )
-        
+
         df_atacadao_sales_transformed = df_atacadao_sales_transformed.where(
             (col("ingestion_date") == col("max_ingestion_date"))
         )
 
-        df_atacadao_sales_transformed = (
-            df_atacadao_sales_transformed.drop(col("max_ingestion_date"))
-        )
-        
-        df_atacadao_sales_transformed = (
-            df_atacadao_sales_transformed.dropDuplicates()
+        df_atacadao_sales_transformed = df_atacadao_sales_transformed.drop(
+            col("max_ingestion_date")
         )
 
+        df_atacadao_sales_transformed = df_atacadao_sales_transformed.dropDuplicates()
+
         return df_atacadao_sales_transformed
-    
+
     def extract_gold_atacadao_sales(self) -> DataFrame:
 
         df_gold_atacadao_sales = self.get_table(
-            "brewdat_uc_saz_prod.gld_br_sales_sellout_atacadao.sales"
+            "brewdat_uc_saz_prod.gld_saz_sales_atacadao.sales"
         )
 
         return df_gold_atacadao_sales
-    
-    def merge_dataframes(self, df_gold_atacadao_sales, df_silver_atacadao_sales) -> DataFrame:
-        
-        df_atacadao_sales_merged = df_gold_atacadao_sales.union(df_silver_atacadao_sales)
-        
+
+    def merge_dataframes(
+        self, df_gold_atacadao_sales, df_silver_atacadao_sales
+    ) -> DataFrame:
+
+        df_atacadao_sales_merged = df_gold_atacadao_sales.union(
+            df_silver_atacadao_sales
+        )
+
         return df_atacadao_sales_merged
-    
+
     def transformation_in_destination(self, df_atacadao_sales_merged) -> DataFrame:
         df_atacadao_sales_transformed = df_atacadao_sales_merged.dropDuplicates()
 
         return df_atacadao_sales_transformed
 
-
     # This method is mandatory and the final transformation of your dataframe must be returned here
     def definitions(self):
         # Apply your transformation and return your final dataframe
-        #df_example = self.extract_silver_atacadao_sales()
+        # df_example = self.extract_silver_atacadao_sales()
         current_datetime = self.get_datetime()
 
         is_first_execution = self.is_first_execution_by_date(current_datetime)
@@ -161,21 +166,30 @@ class Sales(Transformation):
             )
 
             # select columns, verify nulls and rename columns
-            df_selected_atacadao_sales = self.select_columns_atacada_sales(df_extracted_atacadao_sales)
+            df_selected_atacadao_sales = self.select_columns_atacada_sales(
+                df_extracted_atacadao_sales
+            )
 
-            #transformation
+            # transformation
             final_dataframe = self.transformation_in_source(df_selected_atacadao_sales)
-        else:            
+        else:
 
             df_gold_atacadao_sales = self.extract_gold_atacadao_sales()
 
-            df_extracted_atacadao_sales = self.extract_silver_atacadao_sales(current_datetime, False)
+            df_extracted_atacadao_sales = self.extract_silver_atacadao_sales(
+                current_datetime, False
+            )
 
             # select columns, verify nulls and rename columns
-            df_selected_atacadao_sales = self.select_columns_atacada_sales(df_extracted_atacadao_sales)
+            df_selected_atacadao_sales = self.select_columns_atacada_sales(
+                df_extracted_atacadao_sales
+            )
 
             # merge dataframes silver source and gold destination
-            df_merged_atacadao_sales = self.merge_dataframes(df_gold_atacadao_sales, df_extracted_atacadao_sales)
+            df_merged_atacadao_sales = self.merge_dataframes(
+                df_gold_atacadao_sales,  # destination
+                df_selected_atacadao_sales,  # source
+            )
 
             # apply transformation in merged dataframe
             final_dataframe = self.transformation_in_source(df_merged_atacadao_sales)
@@ -190,7 +204,15 @@ df = sales_task.definitions()
 
 # COMMAND ----------
 
-df_transform.groupBy("DATA").count().display()
+df.select(col("INGESTION_DATE")).distinct().display()
+
+# COMMAND ----------
+
+from pyspark.sql.functions import count, col, to_date
+
+# COMMAND ----------
+
+df.groupBy(to_date("DATA", "dd/MM/yyyy")).count().display()
 
 # COMMAND ----------
 
@@ -365,48 +387,38 @@ df.groupBy(
 
 # COMMAND ----------
 
-# Sample data
-data = [(1.0, float('nan')), (2.0, 3.0), (float('nan'), 4.0)]
-columns = ["col1", "col2"]
 
-# Create DataFrame
-df = spark.createDataFrame(data, columns)
+current_date = datetime.now().date() - timedelta(weeks=1)
 
-# Function to check for NaN and replace with None if NaN
-def check_nan(column):
-    return when(col(column) != 'NaN', col(column)).otherwise(None)
+print(current_date)
 
-# Apply the function to each column in the DataFrame
-for column in df.columns:
-    #df = df.withColumn(column, check_nan(column))
-    print(column)
+df_atacadao_sales = spark.table(
+    "brewdat_uc_saz_prod.brz_saz_sales_atacadao.br_sales"
+)
 
-# Show the result
-df.show()
+# Add new column ingestion date with the year, month and day
+df_atacadao_sales = df_atacadao_sales.withColumn(
+    "ingestion_date",
+    concat_ws("-", col("year"), col("month"), col("day")).cast("date"),
+)
 
-# COMMAND ----------
-
-# Sample data
-data = [(1.0, float('nan')), (2.0, 3.0), (float('nan'), 4.0)]
-columns = ["col1", "col2"]
-
-# Create DataFrame
-df = spark.createDataFrame(data, columns)
-
-df.show()
-
-# Apply the function to each column in the DataFrame
-for column in df.columns:
-    df = df.withColumn(column, sales_task.check_nan(column))
-
-
+# df_atacadao_sales = df_atacadao_sales.where(
+#     df_atacadao_sales.ingestion_date >= current_date
+# )
 
 # COMMAND ----------
 
-
+df_atacadao_sales.groupBy(col("ingestion_date")).count().display()
 
 # COMMAND ----------
 
-# MAGIC %environment
-# MAGIC "client": "1"
-# MAGIC "base_environment": ""
+df = spark.sql(
+"""
+    SELECT INGESTION_DATE, count(*) contador 
+    FROM brewdat_uc_saz_prod.gld_saz_sales_atacadao.sales
+    GROUP BY INGESTION_DATE
+""")
+
+# COMMAND ----------
+
+df.write.mode("overwrite").saveAsTable("brewdat_uc_saz_dev.gld_saz_sales_atacadao.sales")

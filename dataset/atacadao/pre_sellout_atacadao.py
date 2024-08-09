@@ -105,12 +105,19 @@ class PreSellout(Transformation):
         # Filter the DataFrame to include only rows where 'DATA' is not null
         df_atacadao_transformed = df_atacadao_transformed.filter('DATA is not null')
 
-        # Define start_date and end_date
+        # set date range last 60 day
         start_date = date.today() - timedelta(days=60)
         end_date = date.today()
 
+        # set first day of month
+        first_day_of_the_month = date.today().replace(day=1)
+
+        # if today is first day of the month
         # Filter the DataFrame to include only rows where 'DATA' is between start_date and end_date
-        df_atacadao_transformed = df_atacadao_transformed.filter("DATA >= start_date AND DATA <= end_date")
+        if date.today() != first_day_of_the_month:
+            df_atacadao_transformed = (
+                df_atacadao_transformed.filter(col("DATA").between(start_date, end_date))
+            )
 
         # Aggregate the data by the specified columns and sum the relevant metrics
         df_atacadao_transformed_group = (
@@ -193,15 +200,19 @@ class PreSellout(Transformation):
 
         df_atacadao_transformed = self.transformation_atacadao_presellout(df_atacadao_sales)
 
-        df_atacadao_presellout = self.select_columns_atacadao_presellout(df_atacadao_transformed)
+        df_atacadao_pre_sellout = self.select_columns_atacadao_presellout(df_atacadao_transformed)
 
-        return df_atacadao_presellout
+        return df_atacadao_pre_sellout
 
 # COMMAND ----------
 
 pre_sellout = PreSellout()
 
 df_atacadao_sales = pre_sellout.definitions()
+
+# COMMAND ----------
+
+df_atacadao_sales.diplay()
 
 # COMMAND ----------
 
@@ -233,10 +244,18 @@ return_metadata(df_atacadao_sales)
 
 # COMMAND ----------
 
+# set date range last 60 day
 start_date = date.today() - timedelta(days=60)
 end_date = date.today()
 
-print(start_date, end_date)
+# set first day of month
+first_day_of_month = date.today().replace(day=1)
+
+if date.today() != first_day_of_month:
+
+#     df_atacadao_transformed = (
+#         df_atacadao_transformed.filter(col("DATA").between(start_date, end_date))
+#     )
 
 # COMMAND ----------
 
@@ -248,10 +267,82 @@ if start_date.replace(' ',''):
 
 # COMMAND ----------
 
-
+v_string = ' '
 
 # COMMAND ----------
 
-# MAGIC %environment
-# MAGIC "client": "1"
-# MAGIC "base_environment": ""
+
+
+if v_string.replace('',''):
+    print(True)
+else:
+    print(False)
+
+# COMMAND ----------
+
+
+from pyspark.sql.functions import col, column
+
+# COMMAND ----------
+
+data = [["apple", 10.0], ["orange", 20.0], ["banana", 30.0]]
+
+df = spark.createDataFrame(data, ["name", "price"])
+
+# COMMAND ----------
+
+df.select(column("name"), col("price")).display()
+
+# COMMAND ----------
+
+spark.conf.set("spark.sql.sources.partitionOverwriteMode", "DYNAMIC")
+
+# Check the mode for Partition Overwrite
+spark.conf.get("spark.sql.sources.partitionOverwriteMode")
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC SELECT min(to_date(data, 'dd/MM/yyyy')), 
+# MAGIC        max(to_date(data, 'dd/MM/yyyy')),
+# MAGIC        count(*)
+# MAGIC FROM brewdat_uc_saz_prod.slv_saz_sales_atacadao.br_sales
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC SELECT concat_ws("-", year, month, day),
+# MAGIC        to_date(data, 'dd/MM/yyyy'),
+# MAGIC
+# MAGIC        count(*)
+# MAGIC FROM brewdat_uc_saz_prod.slv_saz_sales_atacadao.br_sales
+# MAGIC GROUP BY concat_ws("-", year, month, day), to_date(data, 'dd/MM/yyyy')
+# MAGIC ORDER BY concat_ws("-", year, month, day), to_date(data, 'dd/MM/yyyy')
+
+# COMMAND ----------
+
+df_ingestion = spark.sql(
+"""
+    SELECT  *
+    FROM    brewdat_uc_saz_prod.slv_saz_sales_atacadao.br_sales slv 
+    JOIN
+    (
+        SELECT  DISTINCT         
+                cast(concat_ws("-", slv.year, slv.month, slv.day) as date) AS ingestion_date
+        FROM    brewdat_uc_saz_prod.slv_saz_sales_atacadao.br_sales slv
+        ORDER BY ingestion_date DESC
+        LIMIT 4
+    ) AS tmp
+    ON cast(concat_ws("-", slv.year, slv.month, slv.day) as date) = tmp.ingestion_date
+"""
+)
+
+df_ingestion.groupBy("ingestion_date").count().display()
+
+# COMMAND ----------
+
+df_ingestion.groupBy("ingestion_date").count().display()
+
+# COMMAND ----------
+
+

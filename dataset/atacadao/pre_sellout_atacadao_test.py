@@ -59,9 +59,3 @@ df_atacadao_group = df_atacadao_volume.groupBy("CATEGORY","BRAND","PRODUCT_SOURC
 # COMMAND ----------
 
 
-
-# COMMAND ----------
-
-# MAGIC %environment
-# MAGIC "client": "1"
-# MAGIC "base_environment": ""
