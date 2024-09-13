@@ -1,4 +1,5 @@
 # Databricks notebook source
+# Databricks notebook source
 import json
 
 from engineeringstore.core.transformation.task.task_entrypoint import TaskEntryPoint
@@ -31,14 +32,14 @@ class SelloutTask(Transformation):
         Returnes:
             _type_: bool
         """
-        dates = [date(2024, 7, 17), date(2024, 7, 18), date(2024, 7, 19)]
+        dates = [date(2024, 9, 9), date(2024, 9, 9)]
 
-        if current_datetime.date() in dates:
+        if self.reference_date.date() in dates:
             return True
         else:
             return False
 
-    def load_silver_rede_mateus_sellout(
+    def extract_silver_rede_mateus_sellout(
         self, current_datetime, is_first_load
     ) -> DataFrame:
         """
@@ -46,8 +47,6 @@ class SelloutTask(Transformation):
         Returns:
             _type_: dataframe spark
         """
-
-        current_date = current_datetime.date() - timedelta(days=3)
 
         df_rede_mateus_sellout = self.get_table(
             "brewdat_uc_saz_prod.slv_saz_sales_rede_mateus.br_sellout"
@@ -59,16 +58,18 @@ class SelloutTask(Transformation):
             concat_ws("-", col("year"), col("month"), col("day")).cast("date"),
         )
 
-        if is_first_load:
-            return df_rede_mateus_sellout
+        if is_first_load:            
+            return df_rede_mateus_sellout        
         else:
-            df_rede_mateus_sellout = df_rede_mateus_sellout.where(
+            current_date = current_datetime.date() - timedelta(days=7)
+
+            df_rede_mateus_sellout = df_rede_mateus_sellout.filter(
                 df_rede_mateus_sellout.ingestion_date >= current_date
             )
-
+            
             return df_rede_mateus_sellout
 
-    def select_rede_mateus_sellout_columns(self, df_rede_mateus_sellout) -> DataFrame:
+    def select_columns_rede_mateus_sellout(self, df_rede_mateus_sellout) -> DataFrame:
         """
             - select only the required columns
             - rename them if necessary
@@ -77,7 +78,7 @@ class SelloutTask(Transformation):
             df_rede_mateus_sellout (spark.DataFrame): Transformed dataframe.
         """
 
-        df_rede_mateus_sellout_columns = df_rede_mateus_sellout.select(
+        df_rede_mateus_selected = df_rede_mateus_sellout.select(
             "data",
             "cnpj",
             "desc",
@@ -93,15 +94,16 @@ class SelloutTask(Transformation):
         )
 
         # Rename columns for uppercase
-        df_rede_mateus_sellout_columns = df_rede_mateus_sellout_columns.toDF(
-            *[c.strip().upper() for c in df_rede_mateus_sellout_columns.columns]
+        df_rede_mateus_selected = df_rede_mateus_selected.toDF(
+            *[c.strip().upper() for c in df_rede_mateus_selected.columns]
         )
 
-        return df_rede_mateus_sellout_columns
+        return df_rede_mateus_selected
 
     def apply_transformation_in_source(self, df_rede_mateus_sellout) -> DataFrame:
         """
-        Retrieve the first row number for CNPJ, CODIGOBARRAS, DESCPRODUTO, DATA and filter only row number 1
+        Retrieve the first row number for CNPJ, CODIGOBARRAS, DESCPRODUTO, DATA 
+        and filter only row number 1
 
         Args:
             df_rede_mateus_sellout (spark.DataFrame) : Selected dataframe.
@@ -130,35 +132,35 @@ class SelloutTask(Transformation):
 
         return df_rede_mateus_sellout_transformed
 
-    def load_scd_dim_type_1_rede_mateus_sellout(self) -> DataFrame:
+    def extract_gold_rede_mateus_sellout(self) -> DataFrame:
         """
             Method used to load Rede Mateus Sellout SCD type 1
         Returns:
-            df_scd_dim_type_1_rede_mateus_sellout (spark.DataFrame): Dataframe destination.
+            df_gold_rede_mateus_sellout (spark.DataFrame): Dataframe destination.
         """
 
-        df_scd_dim_type_1_rede_mateus_sellout = self.get_table(
+        df_gold_rede_mateus_sellout = self.get_table(
             "brewdat_uc_saz_prod.gld_saz_sales_rede_mateus.sellout"
         )
 
-        return df_scd_dim_type_1_rede_mateus_sellout
+        return df_gold_rede_mateus_sellout
 
     def merge_dataframes(
-        self, df_scd_dim_type_1_rede_mateus_sellout, df_rede_mateus_sellout
+        self, df_gold_rede_mateus_sellout, df_rede_mateus_sellout
     ) -> DataFrame:
         """
             Merge source and destination dataframes and return for next step
         Args:
-            df_scd_dim_type_1_rede_mateus_sellout (spark.DataFrame): Destination dataframe
+            df_gold_rede_mateus_sellout (spark.DataFrame): Destination dataframe
             df_rede_mateus_sellout (spark.DataFrame): Source dataframe
 
         Returns:
             DataFrame (spark.DataFrame): Merged dataframe
         """
 
-        return df_scd_dim_type_1_rede_mateus_sellout.union(df_rede_mateus_sellout)
+        return df_gold_rede_mateus_sellout.union(df_rede_mateus_sellout)
 
-    def apply_transformation_in_merge_data(self, df_rede_mateus_sellout) -> DataFrame:
+    def apply_transformation_in_destination(self, df_rede_mateus_sellout) -> DataFrame:
         """_summary_
 
         Args:
@@ -206,49 +208,73 @@ class SelloutTask(Transformation):
         is_first_load = self.is_first_execution_by_date(current_datetime)
 
         if is_first_load:
-            df_rede_mateus_sellout = self.load_silver_rede_mateus_sellout(
+            df_silver_rede_mateus_sellout = self.extract_silver_rede_mateus_sellout(
                 current_datetime, True
             )
 
-            df_select_mateus_sellout_columns = self.select_rede_mateus_sellout_columns(
-                df_rede_mateus_sellout
+            df_rede_mateus_selected = self.select_columns_rede_mateus_sellout(
+                df_silver_rede_mateus_sellout
             )
 
-            final_dataframe = self.apply_transformation_in_source(
-                df_select_mateus_sellout_columns
+            df_rede_mateus_final = self.apply_transformation_in_source(
+                df_rede_mateus_selected
             )
         else:
-            df_scd_type1_rede_mateus_sellout = (
-                self.load_scd_dim_type_1_rede_mateus_sellout()
+            df_gold_rede_mateus_sellout = (
+                self.extract_gold_rede_mateus_sellout()
             )
 
-            df_rede_mateus_sellout = self.load_silver_rede_mateus_sellout(
+            df_silver_rede_mateus_sellout = self.extract_silver_rede_mateus_sellout(
                 current_datetime, False
             )
 
-            df_select_mateus_sellout_columns = self.select_rede_mateus_sellout_columns(
-                df_rede_mateus_sellout
+            df_rede_mateus_selected = self.select_columns_rede_mateus_sellout(
+                df_silver_rede_mateus_sellout
             )
 
-            df_apply_transformation_in_source = self.apply_transformation_in_source(
-                df_select_mateus_sellout_columns
+            df_rede_mateus_transformed = self.apply_transformation_in_source(
+                df_rede_mateus_selected
             )
 
-            df_merge_dataframes = self.merge_dataframes(
-                df_scd_type1_rede_mateus_sellout, df_apply_transformation_in_source
+            df_rede_mateus_merged = self.merge_dataframes(
+                df_gold_rede_mateus_sellout, df_rede_mateus_transformed
             )
 
-            final_dataframe = self.apply_transformation_in_merge_data(
-                df_merge_dataframes
+            df_rede_mateus_final = self.apply_transformation_in_destination(
+                df_rede_mateus_merged
             )
 
-        return final_dataframe
+        return df_rede_mateus_final
 
 
 # COMMAND ----------
 
 sellout_task = SelloutTask()
-df = sellout_task.definitions()
+df__ = sellout_task.definitions()
+
+# COMMAND ----------
+
+sellout_task.get_datetime()
+
+# COMMAND ----------
+
+sellout_task.is_first_execution_by_date(datetime.now())
+
+# COMMAND ----------
+
+df_silver = sellout_task.extract_silver_rede_mateus_sellout(datetime.now(), False)
+
+# COMMAND ----------
+
+df_silver.display()
+
+# COMMAND ----------
+
+df__.filter(col("INGESTION_DATE") == "2024-07-16").display()
+
+# COMMAND ----------
+
+df_silver.groupBy("INGESTION_DATE").count().display()
 
 # COMMAND ----------
 
@@ -282,6 +308,10 @@ df.where("""
 # MAGIC AND DATA == '2024-06-01' 
 # MAGIC AND DESCPRODUTO == 'OUTROS 1L'
 # MAGIC AND CNPJ == '3995515017647'
+
+# COMMAND ----------
+
+# MAGIC %sh curl -v telnet://ns-mdm-adapters-dev-scus-001.servicebus.windows.net
 
 # COMMAND ----------
 

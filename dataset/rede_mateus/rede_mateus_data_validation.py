@@ -14,6 +14,36 @@
 
 # COMMAND ----------
 
+# DBTITLE 1,Migração Historico
+# MAGIC %sql
+# MAGIC SELECT  min(data) min_date,
+# MAGIC         max(data) max_date,
+# MAGIC         count(*) count_rows
+# MAGIC FROM    brewdat_uc_saz_prod.brz_saz_sales_rede_mateus.br_sellout
+# MAGIC WHERE   1=1
+# MAGIC AND     year(data) < '2024'
+
+# COMMAND ----------
+
+spark.conf.set("spark.sql.legacy.timeParserPolicy", "LEGACY")
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC SELECT  min(data) min_date,
+# MAGIC         max(data) max_date,
+# MAGIC         count(*) count_rows
+# MAGIC FROM    brewdat_uc_saz_prod.slv_saz_sales_rede_mateus.br_sellout
+# MAGIC WHERE   1=1
+# MAGIC AND     to_date(data,'yyyy-MM-dd') < '2024-01-01'
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC DESC brewdat_uc_saz_prod.brz_saz_sales_rede_mateus.br_sellout
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC # Silver
 
@@ -67,11 +97,43 @@ df_filtered.where("row_number == 1").display()
 
 # COMMAND ----------
 
+# DBTITLE 1,Min e Max Data
+# MAGIC %sql
+# MAGIC SELECT  min(to_date(DATA, 'yyyy-MM-dd')) min_data, 
+# MAGIC         max(to_date(DATA, 'yyyy-MM-dd')) max_data,
+# MAGIC         count(*) count_rows
+# MAGIC FROM    brewdat_uc_saz_prod.gld_saz_sales_rede_mateus.sellout sel
+
+# COMMAND ----------
+
+# DBTITLE 1,OnePlatform - Export for Data Validation
+# MAGIC %sql
+# MAGIC SELECT  DATA,
+# MAGIC         count(*) COUNT_ROWS,
+# MAGIC         sum(QUANTIDADEVENDA) as QUANTIDADEVENDA,
+# MAGIC         sum(QUANTIDADEESTOQUE) as QUANTIDADEESTOQUE,
+# MAGIC         sum(VALORVENDA) as VALORVENDA
+# MAGIC FROM    brewdat_uc_saz_prod.gld_saz_sales_rede_mateus.sellout sel
+# MAGIC WHERE   1=1
+# MAGIC AND     DATA >= '2024-01-01'
+# MAGIC AND     DATA <= '2024-08-15'
+# MAGIC AND     sel.CODIGOBARRAS <> '0'
+# MAGIC GROUP BY sel.data
+# MAGIC ORDER BY sel.data
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC DESCRIBE brewdat_uc_saz_prod.gld_saz_sales_rede_mateus.sellout 
+
+# COMMAND ----------
+
 # MAGIC %sql
 # MAGIC SELECT  to_date(DATA, 'yyyy-MM-dd') as DATA,
 # MAGIC         count(*) count_rows,
 # MAGIC         sum(QUANTIDADEVENDA) as QUANTIDADEVENDA,
-# MAGIC         sum(QUANTIDADEESTOQUE) as QUANTIDADEESTOQUE
+# MAGIC         sum(QUANTIDADEESTOQUE) as QUANTIDADEESTOQUE,
+# MAGIC         sum(VALORVENDA) as VALORVENDA
 # MAGIC FROM  brewdat_uc_saz_prod.slv_saz_sales_rede_mateus.br_sellout
 # MAGIC WHERE 1=1
 # MAGIC AND DATA == '2024-06-01'
@@ -130,6 +192,64 @@ df_filtered.where("row_number == 1").display()
 # MAGIC -- AND DESCPRODUTO == 'REFRIGERANTES OUTROS 2L'
 # MAGIC AND CODIGOBARRAS <> '0'
 # MAGIC -- ORDER BY CNPJ, DESCPRODUTO, QUANTIDADEVENDA
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # Gold - Pré-Sellout
+# MAGIC
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC
+# MAGIC |current_date|min_date  | max_date  |count_rows|
+# MAGIC |---|---|---|---|
+# MAGIC |2024-08-21| 2024-06-22 |2024-08-19 |460.922   |
+# MAGIC |2024-08-22| 2024-06-22 |2024-08-20 |468.080   |
+# MAGIC |2024-08-23|2024-06-22  |2024-08-21 |475.686   |
+# MAGIC
+
+# COMMAND ----------
+
+# DBTITLE 1,Pré-Sellout
+# MAGIC %sql
+# MAGIC SELECT  min(data) min_date, 
+# MAGIC         max(data) max_date, 
+# MAGIC         count(*) count_rows
+# MAGIC FROM  brewdat_uc_saz_prod.gld_saz_sales_rede_mateus.pre_sellout
+# MAGIC WHERE   1=1
+# MAGIC AND     PRODUCT_SOURCE_CODE <> '0'
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC SELECT  DATA, count(*) COUNT_ROWS
+# MAGIC FROM    brewdat_uc_saz_prod.gld_saz_sales_rede_mateus.pre_sellout
+# MAGIC WHERE   1=1
+# MAGIC --AND     to_date(DATA, 'yyyy-MM-dd') >= '2024-06-22'
+# MAGIC --AND     to_date(DATA, 'yyyy-MM-dd') <= '2024-08-19'
+# MAGIC AND     PRODUCT_SOURCE_CODE <> '0'
+# MAGIC GROUP BY DATA
+# MAGIC ORDER BY DATA
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC SELECT  DISTINCT *
+# MAGIC FROM  brewdat_uc_saz_prod.gld_saz_sales_rede_mateus.pre_sellout
+# MAGIC WHERE 1=1
+# MAGIC AND   DATA = '2024-08-01'
+# MAGIC AND   PRODUCT_SOURCE_CODE <> '0'
+
+# COMMAND ----------
+
+from datetime import date, timedelta
+
+start_date = date.today() - timedelta(days=60)
+end_date = date.today()
+
+print(f"start_date: {start_date} | end_date: {end_date}")
 
 # COMMAND ----------
 

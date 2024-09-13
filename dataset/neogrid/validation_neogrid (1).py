@@ -1,4 +1,18 @@
 # Databricks notebook source
+# MAGIC %md
+# MAGIC # Silver
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC SELECT year, month, day, count(*) count_rows
+# MAGIC FROM  brewdat_uc_saz_prod.slv_saz_sales_neogrid.br_sellout slv
+# MAGIC GROUP BY year, month, day
+# MAGIC ORDER BY year, month, day
+# MAGIC
+
+# COMMAND ----------
+
 # MAGIC %sql
 # MAGIC SELECT  dia, 
 # MAGIC         sel.codigo_varejo,
@@ -35,9 +49,21 @@
 
 # COMMAND ----------
 
+# MAGIC %md
+# MAGIC # Gold
+
+# COMMAND ----------
+
 # MAGIC %sql
 # MAGIC DESCRIBE brewdat_uc_saz_prod.gld_saz_sales_neogrid.sellout
 
 # COMMAND ----------
 
+# MAGIC %md 
+# MAGIC # Pré-Sellout
+# MAGIC
 
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC SELECT * FROM brewdat_uc_saz_prod.gld_saz_sales_neogrid.pre_sellout

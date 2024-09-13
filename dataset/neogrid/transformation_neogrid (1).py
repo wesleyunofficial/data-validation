@@ -91,20 +91,19 @@ class Sellout(Transformation):
             return df_neogrid_sellout
 
     def extract_gold_neogrid_sellout(self) -> DataFrame:
-        """Return PySpark DataFrame with sellout data from the brewdat_uc_saz_prod.gld_br_sales_sellout_neogrid.sellout.
+        """Return PySpark DataFrame with sellout data from the brewdat_uc_saz_prod.gld_saz_sales_neogrid.sellout
 
         Returns:
             DataFrame: PySpark DataFrame.
         """
 
         df_gold_neogrid_sellout = self.get_table(
-            "brewdat_uc_saz_prod.gld_br_sales_sellout_neogrid.sellout"
+            "brewdat_uc_saz_prod.gld_saz_sales_neogrid.sellout"
         )
 
         return df_gold_neogrid_sellout
 
     def select_columns_neogrid_sellout(self, df_neogrid_sellout) -> DataFrame:
-
         """
         Processes the given DataFrame by renaming columns to uppercase,
         filtering out specific rows, and formatting the 'DIA' column as a date.
@@ -154,7 +153,6 @@ class Sellout(Transformation):
         return df_neogrid_sellout
 
     def apply_transformation(self, df_neogrid_sellout) -> DataFrame:
-
         """
         Apply various transformations to the input DataFrame.
         - drop duplicates values
@@ -253,7 +251,7 @@ class Sellout(Transformation):
             df_gold_neogrid_sellout = self.extract_gold_neogrid_sellout()
 
             # Extract data from source (silver layer)
-            df_extracted_neogrid_sellout = self.extract_silver_neogrid_selout(
+            df_extracted_neogrid_sellout = self.extract_silver_neogrid_sellout(
                 current_datetime, False
             )
 
@@ -273,11 +271,12 @@ class Sellout(Transformation):
         return final_dataframe
 
 
-# Call brewdat TaskEntryPoint to handle transformation and load the data
+# # Call brewdat TaskEntryPoint to handle transformation and load the data
 # context = json.loads(dbutils.widgets.get("context"))
 # task_entry_point = TaskEntryPoint(context=context, transformation_object=Sellout())
 # task = task_entry_point.handle()
 # task.run()
+
 
 
 # COMMAND ----------
@@ -295,11 +294,19 @@ df_transformed.count()
 # COMMAND ----------
 
 
-df_transformed.groupBy("DIA").agg(count("*").alias("contador")).display()
 
 # COMMAND ----------
 
 
+df_transformed.groupBy("DIA").agg(count("*").alias("contador")).display()
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC SELECT *
+# MAGIC FROM brewdat_uc_saz_prod.gld_saz_sales_neogrid.sellout
+# MAGIC
+# MAGIC `brewdat_uc_saz_prod`.`gld_br_sales_sellout_neogrid`.`sellout`
 
 # COMMAND ----------
 
