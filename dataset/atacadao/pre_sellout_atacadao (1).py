@@ -403,4 +403,30 @@ df_ingestion.groupBy("ingestion_date").count().display()
 
 # COMMAND ----------
 
+# MAGIC %sql
+# MAGIC select count(*), year, month, day
+# MAGIC from
+# MAGIC brewdat_uc_saz_prod.slv_saz_sales_eg.br_lin_emb_consolid
+# MAGIC GROUP BY year, month, day
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC SELECT DISTINCT 
+# MAGIC         cod_lin_emb_consolid, 
+# MAGIC         dat_alt,
+# MAGIC         rank() OVER (PARTITION BY cod_lin_emb_consolid ORDER BY dat_alt DESC)
+# MAGIC FROM  brewdat_uc_saz_prod.slv_saz_sales_eg.br_lin_emb_consolid
+# MAGIC QUALIFY rank() OVER (PARTITION BY cod_lin_emb_consolid ORDER BY dat_alt DESC) == 1
+# MAGIC --GROUP BY cod_lin_emb_consolid
+# MAGIC --HAVING count(*) > 1
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC SELECT *
+# MAGIC FROM  brewdat_uc_saz_prod.slv_saz_sales_eg.br_lin_emb_consolid
+
+# COMMAND ----------
+
 
