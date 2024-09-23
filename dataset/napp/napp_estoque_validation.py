@@ -1,4 +1,8 @@
 # Databricks notebook source
+spark.conf.set("spark.sql.legacy.timeParserPolicy", "LEGACY")
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC # Bronze
 
@@ -52,4 +56,7 @@
 
 # COMMAND ----------
 
-
+# MAGIC %sql
+# MAGIC SELECT to_date(concat_ws('-', year, month, day), 'yyyy-MM-dd') as ingestion_date
+# MAGIC FROM brewdat_uc_saz_prod.slv_saz_sales_nap.br_sales
+# MAGIC WHERE data = '2021-01-01'
