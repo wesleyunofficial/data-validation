@@ -1,0 +1,5 @@
+# Databricks notebook source
+cleansing_master_treated = "brewdat_uc_saz_mlp_featurestore_dev.sales.cleansing_master_treated
+
+
+brewdat_uc_saz_prod.brz_saz_sales_mastertable.br_mastertable_generic
