@@ -115,7 +115,7 @@ def process_master_table_generic():
   # table_name = ""  
   # df_master_table_generic = self.get_table(table_name)
 
-  master_table_generic_path =  'SellOut/Manual/MasterTable2GenericSellOutOffTrade'
+  master_table_generic_path = 'SellOut/Manual/MasterTable2GenericSellOutOffTrade'
   
   # Master generic
   dl_reader = FileReader(
@@ -289,13 +289,21 @@ df_master_treated.count()
 
 # COMMAND ----------
 
+print(f"MasterTable: ", df_master_table.count(), 
+      "\nMasterTableGeneric: ", df_master_table_generic.count(),
+      "\nDistincProducts: ", df_distinct_products.count(),
+      "\nDistinctTreated: ", df_distinct_treated.count(),
+      "\nMasterTreated: ", df_master_treated.count())
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC # Match By EAN
 
 # COMMAND ----------
 
 # DBTITLE 1,Match By EAN
-def match_by_ean(df_master_table, df_distinct_products, join_keys):  
+def match_by_ean(df_master_table, df_distinct_products):  
 
   # Seleciona as colunas e faz o filtro
   df_ean_match = (
@@ -312,20 +320,22 @@ def match_by_ean(df_master_table, df_distinct_products, join_keys):
     ).filter("PRODUCT_SOURCE_CODE != 0")
   )
 
+  join_keys = df_master_table.EAN_EX == df_ean_match.PRODUCT_SOURCE_CODE
+
   # Faz o join com MasterOriginalExplode
   df_ean_match = (
-    df_ean_match.join(
-      df_master_table_explode.alias('MasterOriginalExplode'),
-      col('MasterOriginalExplode.EAN_EX') == col('DistinctInput.PRODUCT_SOURCE_CODE'),
-      'inner'
-      )
-
     # df_ean_match.join(
-    #   df_master_table_explode,
-    #   join_keys,
+    #   df_master_table_explode.alias('MasterOriginalExplode'),
+    #   col('MasterOriginalExplode.EAN_EX') == col('DistinctInput.PRODUCT_SOURCE_CODE'),
     #   'inner'
     #   )
+
+    df_ean_match.join(
+      df_master_table,
+      join_keys,
+      'inner'
     )
+  )
   
   # Adiciona a coluna 'PRODUCT_MATCH_TYPE'
   df_ean_match = df_ean_match.withColumn('PRODUCT_MATCH_TYPE', lit('EAN'))
@@ -339,9 +349,9 @@ def match_by_ean(df_master_table, df_distinct_products, join_keys):
 
 df_master_table_explode = explode_column(df_master_table, 'EAN', 'EAN_EX')
 
-join_keys = df_master_table_explode.EAN_EX == df_ean_match.PRODUCT_SOURCE_CODE
+#join_keys = df_master_table_explode.EAN_EX == df_ean_match.PRODUCT_SOURCE_CODE
 
-df_ean_match = match_by_ean(df_master_table_explode, df_distinct_products, join_keys)
+df_ean_match = match_by_ean(df_master_table_explode, df_distinct_products)
 
 df_ean_match.count()
 
@@ -429,13 +439,19 @@ select_columns = ['PRODUCT_ID']
 
 join_keys = df_distinct_products.PRODUCT_ID == df_ean_match.PRODUCT_ID
 
-df_distinct_products_generic = remove_ean_matched(df_distinct_products, df_ean_match, select_columns, join_value)
+df_distinct_products_generic = remove_ean_matched(df_distinct_products, df_ean_match, select_columns, join_keys)
 
 df_distinct_products_generic.count()
 
 # COMMAND ----------
 
-df_ean_match_generic = match_by_ean(df_master_table_generic, df_distinct_products_generic)
+# DBTITLE 1,df_master_table_generic_explode
+df_master_table_generic_explode = explode_column(df_master_table_generic, 'EAN', 'EAN_EX')
+df_master_table_generic_explode.count()
+
+# COMMAND ----------
+
+df_ean_match_generic = match_by_ean(df_master_table_generic_explode, df_distinct_products_generic)
 df_ean_match_generic.count()
 
 # COMMAND ----------
@@ -502,13 +518,10 @@ df_master_table_explode_source_name.count()
 
 # DBTITLE 1,df_description_match
 df_description_match = match_by_description(df_master_table_explode_source_name, df_distinct_products_descriptions)
-df_description_match.count()
+
 
 df_description_match = update_ean_match_columns(df_description_match)
-
-# COMMAND ----------
-
-
+df_description_match.count()
 
 # COMMAND ----------
 
@@ -546,7 +559,7 @@ df_description_match_generic.count()
 
 # COMMAND ----------
 
-def treated_match_by_description(df_distinct_treated, df_master_treated, df_master_table, df_match_ean, df_match_ean_generic, df_match_description, df_match_description_generic):
+def treated_match_by_description(df_distinct_treated, df_master_treated, df_master_table, df_ean_match, df_ean_match_generic, df_description_match, df_description_match_generic):
 
   # Realiza o match pela descrição tratada
   treated_match = (
@@ -585,10 +598,10 @@ def treated_match_by_description(df_distinct_treated, df_master_treated, df_mast
   # Remove os registros que já tiveram match por EAN ou descrição
   treated_match = (
     treated_match
-      .join(df_match_ean, on='PRODUCT_ID', how='left_anti')
-      .join(df_match_ean_generic, on='PRODUCT_ID', how='left_anti')
-      .join(df_match_description, on='PRODUCT_ID', how='left_anti')
-      .join(df_match_description_generic, on='PRODUCT_ID', how='left_anti')
+      .join(df_ean_match, on='PRODUCT_ID', how='left_anti')
+      .join(df_ean_match_generic, on='PRODUCT_ID', how='left_anti')
+      .join(df_description_match, on='PRODUCT_ID', how='left_anti')
+      .join(df_description_match_generic, on='PRODUCT_ID', how='left_anti')
     )
   
   return treated_match
@@ -596,4 +609,187 @@ def treated_match_by_description(df_distinct_treated, df_master_treated, df_mast
 
 # COMMAND ----------
 
-df_match_ean.count()
+df_treated_match = treated_match_by_description(
+  df_distinct_treated,
+  df_master_treated,
+  df_master_table,
+  df_ean_match,
+  df_ean_match_generic,
+  df_description_match,
+  df_description_match_generic
+)
+
+df_treated_match.count()
+
+# COMMAND ----------
+
+df_treated_match = update_ean_match_columns(df_treated_match)
+df_treated_match.count()
+
+# COMMAND ----------
+
+def union_all_matches(df_ean_match, df_description_match, df_ean_match_generic, df_description_match_generic, df_treated_match):
+
+  # Realiza a união de todos os matches diretos
+  df_direct_match = (
+    df_ean_match
+      .unionByName(df_description_match)
+      .unionByName(df_ean_match_generic)
+      .unionByName(df_description_match_generic)
+      .unionByName(df_treated_match)
+  )
+
+  # Remove duplicatas com base em 'PRODUCT_ID'
+  df_direct_match = df_direct_match.dropDuplicates(subset=['PRODUCT_ID'])
+  
+  return df_direct_match
+
+
+# COMMAND ----------
+
+df_direct_match = union_all_matches(df_ean_match, 
+                                    df_description_match, 
+                                    df_ean_match_generic, 
+                                    df_description_match_generic, 
+                                    df_treated_match)
+
+df_direct_match.count()
+
+# COMMAND ----------
+
+select_columns = ['PRODUCT_ID']
+
+join_keys = df_distinct_treated.product_id == df_direct_match.PRODUCT_ID
+
+df_distinct_treated_cleasing = remove_ean_matched(df_distinct_treated, df_direct_match, select_columns, join_keys)
+df_distinct_treated_cleasing.count()
+
+# COMMAND ----------
+
+"""colunas_master = ['product_description', 
+                  'product_description_treated', 
+                  'category', 
+                  'brand_id', 
+                  'family', 
+                  'volume_unit', 
+                  'pack_quantity', 
+                  'package_unit']
+
+df_master_treated = df_master_treated.select(colunas_master)"""
+df_master_treated = df_master_treated.dropDuplicates(['product_description_treated'])
+
+# COMMAND ----------
+
+df_master_treated.count()
+
+# COMMAND ----------
+
+# MAGIC %md
+# MAGIC # Other Functions
+
+# COMMAND ----------
+
+# Adiciona '1unidade' ao fim das descrições sem informação de unidade
+def add_unidade(df):
+  df = df.withColumn('product_description_treated', F.when(df.product_description_treated.like('%unidade%'),
+                                                  df.product_description_treated)\
+                                                  .otherwise(F.concat(df.product_description_treated, F.lit(' 1unidade'))))
+  return df
+
+# COMMAND ----------
+
+# Cria a lista de palavras da master, alem de adicionar algumas palavras chave
+def create_list_of_words(master):
+  descriptions = list(master.select('product_description_treated').collect())
+  descriptions = [phrase[0] for phrase in descriptions]
+
+  master_words = ' '.join(descriptions)
+  master_words = master_words.split(' ')
+
+  master_words = master_words+ ['do bem', 'ln', 'ow', 'budweiser', 
+                         'bohemia', 'brahma', 'skol', 'antarctica', 
+                         'wals', 'beats', 'pilsen', 'ml', 'misto', 'garrafa']
+
+  master_words = [word for word in master_words if len(word) > 1]
+
+  master_words = list(set(master_words))
+  return master_words
+
+# COMMAND ----------
+
+# Corrige erros de digitação e normaliza palavras. Usa como base a lista de palavras presentes na master (master_words)
+@udf(T.StringType())
+def fix_typo(text):
+    words_list = text.split(' ')
+    final_text = list()
+    for word in words_list:
+        if word in master_words or 'ml' in word or all(map(str.isdigit, word)):
+            final_text.append(word + ' ')
+        else:
+            try:
+                matched_word = difflib.get_close_matches(word, master_words, 1, cutoff=0.90)[0]
+                final_text.append(matched_word + ' ')
+            except:
+                pass
+                
+    final_text = ''.join(final_text)
+    final_text = final_text.strip()
+    return final_text
+
+# COMMAND ----------
+
+# Deixa somente informações numéricas ou de package
+@udf(T.StringType())
+def create_number_data(text):
+
+    regexp = re.compile(r'\d')
+    packages = ('garrafa', 'pet', 'lt', 'barril', 'draft')
+    
+    text = [word for word in text.split() if regexp.search(word) or word in packages]
+    text = ' '.join(text)
+        
+    return text.strip()
+
+# COMMAND ----------
+
+# Retira informações numéricas
+@udf(T.StringType())
+def create_brand_data(text):
+    
+    text = [word for word in text.split() if not word.endswith('ml') and not word.endswith('unidade') and not word.endswith('unidades')]
+    text = ' '.join(text)
+  
+    return text.strip()
+
+# COMMAND ----------
+
+# Adiciona '1unidade' ao fim das descrições sem informação de unidade
+df_master_treated = add_unidade(df_master_treated)
+
+# Cria lista de palavras presentes na master
+master_words = create_list_of_words(df_master_treated)
+
+# COMMAND ----------
+
+# Conserta possíveis erros de digitação, usando como base a lista de palavras da Master
+df_distinct_treated_cleasing = df_distinct_treated_cleasing.withColumn('product_description_treated', fix_typo('product_treated'))
+
+# Adiciona '1unidade' ao fim das descrições sem informação de unidade
+df_distinct_treated_cleasing = add_unidade(df_distinct_treated_cleasing)
+
+# COMMAND ----------
+
+# Cria descrições só com informação importantes para Volume e Quantidade (number_description) 
+df_distinct_treated_cleasing = df_distinct_treated_cleasing.withColumn('number_description', create_number_data('product_description_treated'))
+
+# Cria descrições só com informação importantes para Marca, Familia e Categoria (brand_description) 
+df_input = (
+  df_distinct_treated_cleasing
+    .withColumn('brand_description', 
+                create_brand_data('product_description_treated'))
+    .drop('brand_id')
+  )
+
+# COMMAND ----------
+
+df_input.count()
