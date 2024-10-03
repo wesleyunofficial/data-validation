@@ -49,6 +49,23 @@
 
 # COMMAND ----------
 
+# MAGIC %md 
+# MAGIC #### Histórico
+# MAGIC
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC SELECT 
+# MAGIC   min(to_date(data, 'yyyy-MM-dd')) as min_date, 
+# MAGIC   max(to_date(data, 'yyyy-MM-dd')) as max_date,
+# MAGIC   count(*)
+# MAGIC FROM brewdat_uc_saz_prod.brz_saz_sales_carrefour.br_sales
+# MAGIC WHERE 1=1
+# MAGIC AND to_date(data, 'dd/MM/yyyy') < '2024-07-04'
+
+# COMMAND ----------
+
 # MAGIC %md
 # MAGIC ## Stocks
 
