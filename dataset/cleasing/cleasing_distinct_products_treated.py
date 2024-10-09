@@ -12,9 +12,9 @@ from pyspark.sql.functions import (
     monotonically_increasing_id,
     reduce,
     regexp_replace,
+    udf,
     when,
 )
-from pyspark.sql.utils import AnalysisException
 from pyspark.sql.types import StringType
 from pyspark.sql import DataFrame
 import re
@@ -22,6 +22,93 @@ from datetime import datetime
 import random
 from unicodedata import normalize
 
+from pyspark.sql import types as T
+
+
+def description_treatment(string):
+
+    crt_dict = {
+        "refrigerante": ["refri", "refrig", "refr", "ref", "refriger"],
+        "cerveja": ["cerv", "cervej", "cer", "cerve"],
+        "chopp": ["chop",],
+        "tonica": ["ton", "tonic"],
+        "itaipava": ["itpv", "itaip"],
+        "do bem": ["db"],
+        "h2oh": ["h2o", "h20h", "h20"],
+        "antarctica": [
+            "antartica",
+            "ant",
+            "antar",
+            "antart",
+            "antartc",
+            "antarct",
+            "antarctic",
+            "antarc",
+            "antartic",
+        ],
+        "schweppes": ["schw"],
+        "guarana": ["guar", "guara", "guarah"],
+        "heineken": ["heinek"],
+        "laranja": ["lar", "laran", "lja"],
+        "limao": ["lim"],
+        "maCZbier": ["maCZebier", "maCZ", "malizbier", "maCZb"],
+        "pilsen": ["pil", "pils"],
+        "budweiser": ["bud", "budweis"],
+        "alcool": ["alc"],
+        "brahma": ["brama", "ahma"],
+        "original": ["orig", "origina", "origin", "ori"],
+        "agua": ["ag"],
+        "coca cola": ["cocacola"],
+        "pepsi": ["pespi"],
+        "sprite": ["sprit"],
+        "mineral": ["min"],
+        "stella": ["stela"],
+        "caixa": ["cx", "cxa"],
+        "unidade": ["un", "uni", "unidad", "und"],
+        "lt": ["lata", "latao", "latagelada", "latas", "lat", "lta"],
+        "garrafa": ["gf", "gfa", "grfa", "grf"],
+        "ln": ["lneck", "longnec", "lnk", "long", "lon"],
+        "zero": ["0,0", "0 alcool", "sacucar", "menos acucar"],
+        "puro malte": ["pmalte"],
+        "senses": ["sense", "sens"],
+        "garrafa 300ml": ["litrinho"],
+    }
+
+    # abv_dict = {}
+    # for k, v in crt_dict.items():
+    #     for x in v:
+    #         abv_dict[x] = k
+
+    stopw = [
+        "atac",
+        "beb",
+        "irrelevante",
+        "cl",
+        "retornavel",
+        "retorn",
+        "gelada",
+        "atcd",
+    ]
+
+    # Inverter o dicionário para substituir abreviações
+    abv_dict = {abbr: full for full, abbrs in crt_dict.items() for abbr in abbrs}
+
+    string = normalize("NFKD", string.lower()).encode("ascii", "ignore").decode("utf-8")
+    #string = self.fix_volume(string)
+    #string = self.fix_specifics_words(string)
+    #string = self.fix_volume(string)
+
+    list_string = [
+        abv_dict[word] if word in abv_dict.keys() else word for word in string.split()
+    ]
+    
+    list_string = [word for word in list_string if word not in stopw]
+    string = " ".join(list_string)
+
+    return string
+
+# Criar a UDF
+description_udf = udf(description_treatment, StringType())
 
 # Main class for your transformation
 class DistinctProductsTreated(Transformation):
@@ -34,18 +121,18 @@ class DistinctProductsTreated(Transformation):
         df_distinct_products = self.get_table(
             "brewdat_uc_saz_prod.gld_saz_sales_distinct_products.distinct_products"
         )
-        
+
         df_distinct_products = df_distinct_products.withColumnRenamed(
             "PRODUCT_SOURCE_CODE", "EAN_SOURCE_CODE"
-        )            
-        
+        )
+
         df_distinct_products = df_distinct_products.withColumn(
             "EAN_SOURCE_CODE",
             when(col("SUBSOURCE_NAME").contains("AUDIT"), lit(0)).otherwise(
                 col("EAN_SOURCE_CODE")
             ),
         )
-        
+
         return df_distinct_products
 
     def transform_distinct_products(self, df_distinct_products: DataFrame) -> DataFrame:
@@ -130,12 +217,11 @@ class DistinctProductsTreated(Transformation):
         df = df.withColumn(column_id_name, monotonically_increasing_id())
 
         return df
-
-    @udf(StringType())
-    def unique_word_string(self, text):
+    
+    @staticmethod
+    def unique_word_string(text):
         ulist = []
         [ulist.append(x) for x in text.split(" ") if x not in ulist]
-
         return " ".join(ulist)
 
     def create_column_product_treated(self, df):
@@ -161,7 +247,8 @@ class DistinctProductsTreated(Transformation):
 
         return df
 
-    def fix_unity(self, string):
+    @staticmethod
+    def fix_unity(string):
 
         # 's/' -> sem 'c/' ou ' c ' -> com
         string = re.sub("s/", " sem ", string)
@@ -186,10 +273,9 @@ class DistinctProductsTreated(Transformation):
         string = re.sub("twelvepack|twelve pack", "12unidade", string)
 
         return string
-
-    ###############################################################################
-
-    def fix_l(self, string):
+    
+    @staticmethod
+    def fix_l(string):
         pattern = (
             r"(\d+)(,|\.|\s+|"
             ")(\d+|"
@@ -204,21 +290,19 @@ class DistinctProductsTreated(Transformation):
         string = re.sub("litrao|litro", " 1000ml ", string)
 
         return string
-
-    ###############################################################################
-
-    def fix_ml(self, string):
+    
+    @staticmethod
+    def fix_ml(string):
         string = re.sub(r"(\d+)(\s+|" ")(ml|m)(\s+|$)", r" \1\3 ", string)
         string = re.sub(r"(\d+)(m)(\s+|$)", r"\1ml ", string)
 
         return string
 
-    ###############################################################################
-
-    def fix_volume(self, string):
-        string = self.fix_unity(string)
-        string = self.fix_l(string)
-        string = self.fix_ml(string)
+    @staticmethod
+    def fix_volume(string):
+        string = DistinctProductsTreated.fix_unity(string)
+        string = DistinctProductsTreated.fix_l(string)
+        string = DistinctProductsTreated.fix_ml(string)
 
         string = re.sub(r"\b(\d+)\s(unidade)", r"\1\2", string)
         string = re.sub(r"0(\d+unidade)", r"\1", string)
@@ -226,8 +310,8 @@ class DistinctProductsTreated(Transformation):
         return string
 
     ###############################################################################
-
-    def fix_specifics_words(self, string):
+    @staticmethod
+    def fix_specifics_words(string):
         string = re.sub("(transf.|transferencia|transf)\s+de\s+mesa\s+\d+", "", string)
         string = re.sub(r"(beck's\b)|(beck( s|\b))", "becks", string)
         string = re.sub(
@@ -256,125 +340,138 @@ class DistinctProductsTreated(Transformation):
 
         return string
 
-    ###############################################################################
-    @udf(StringType())
-    def description_treatment(self, string):
+    # @staticmethod
+    # def description_treatment(string):
 
-        crt_dict = {
-            "refrigerante": ["refri", "refrig", "refr", "ref", "refriger"],
-            "cerveja": ["cerv", "cervej", "cer", "cerve"],
-            "chopp": [
-                "chop",
-            ],
-            "tonica": ["ton", "tonic"],
-            "itaipava": ["itpv", "itaip"],
-            "do bem": ["db"],
-            "h2oh": ["h2o", "h20h", "h20"],
-            "antarctica": [
-                "antartica",
-                "ant",
-                "antar",
-                "antart",
-                "antartc",
-                "antarct",
-                "antarctic",
-                "antarc",
-                "antartic",
-            ],
-            "schweppes": ["schw"],
-            "guarana": ["guar", "guara", "guarah"],
-            "heineken": ["heinek"],
-            "laranja": ["lar", "laran", "lja"],
-            "limao": ["lim"],
-            "maCZbier": ["maCZebier", "maCZ", "malizbier", "maCZb"],
-            "pilsen": ["pil", "pils"],
-            "budweiser": ["bud", "budweis"],
-            "alcool": ["alc"],
-            "brahma": ["brama", "ahma"],
-            "original": ["orig", "origina", "origin", "ori"],
-            "agua": ["ag"],
-            "coca cola": ["cocacola"],
-            "pepsi": ["pespi"],
-            "sprite": ["sprit"],
-            "mineral": ["min"],
-            "stella": ["stela"],
-            "caixa": ["cx", "cxa"],
-            "unidade": ["un", "uni", "unidad", "und"],
-            "lt": ["lata", "latao", "latagelada", "latas", "lat", "lta"],
-            "garrafa": ["gf", "gfa", "grfa", "grf"],
-            "ln": ["lneck", "longnec", "lnk", "long", "lon"],
-            "zero": ["0,0", "0 alcool", "sacucar", "menos acucar"],
-            "puro malte": ["pmalte"],
-            "senses": ["sense", "sens"],
-            "garrafa 300ml": ["litrinho"],
-        }
+    #     crt_dict = {
+    #         "refrigerante": ["refri", "refrig", "refr", "ref", "refriger"],
+    #         "cerveja": ["cerv", "cervej", "cer", "cerve"],
+    #         "chopp": [
+    #             "chop",
+    #         ],
+    #         "tonica": ["ton", "tonic"],
+    #         "itaipava": ["itpv", "itaip"],
+    #         "do bem": ["db"],
+    #         "h2oh": ["h2o", "h20h", "h20"],
+    #         "antarctica": [
+    #             "antartica",
+    #             "ant",
+    #             "antar",
+    #             "antart",
+    #             "antartc",
+    #             "antarct",
+    #             "antarctic",
+    #             "antarc",
+    #             "antartic",
+    #         ],
+    #         "schweppes": ["schw"],
+    #         "guarana": ["guar", "guara", "guarah"],
+    #         "heineken": ["heinek"],
+    #         "laranja": ["lar", "laran", "lja"],
+    #         "limao": ["lim"],
+    #         "maCZbier": ["maCZebier", "maCZ", "malizbier", "maCZb"],
+    #         "pilsen": ["pil", "pils"],
+    #         "budweiser": ["bud", "budweis"],
+    #         "alcool": ["alc"],
+    #         "brahma": ["brama", "ahma"],
+    #         "original": ["orig", "origina", "origin", "ori"],
+    #         "agua": ["ag"],
+    #         "coca cola": ["cocacola"],
+    #         "pepsi": ["pespi"],
+    #         "sprite": ["sprit"],
+    #         "mineral": ["min"],
+    #         "stella": ["stela"],
+    #         "caixa": ["cx", "cxa"],
+    #         "unidade": ["un", "uni", "unidad", "und"],
+    #         "lt": ["lata", "latao", "latagelada", "latas", "lat", "lta"],
+    #         "garrafa": ["gf", "gfa", "grfa", "grf"],
+    #         "ln": ["lneck", "longnec", "lnk", "long", "lon"],
+    #         "zero": ["0,0", "0 alcool", "sacucar", "menos acucar"],
+    #         "puro malte": ["pmalte"],
+    #         "senses": ["sense", "sens"],
+    #         "garrafa 300ml": ["litrinho"],
+    #     }
 
-        abv_dict = {}
-        for k, v in crt_dict.items():
-            for x in v:
-                abv_dict[x] = k
+    #     abv_dict = {}
+    #     for k, v in crt_dict.items():
+    #         for x in v:
+    #             abv_dict[x] = k
 
-        stopw = [
-            "atac",
-            "beb",
-            "irrelevante",
-            "cl",
-            "retornavel",
-            "retorn",
-            "gelada",
-            "atcd",
-        ]
+    #     stopw = [
+    #         "atac",
+    #         "beb",
+    #         "irrelevante",
+    #         "cl",
+    #         "retornavel",
+    #         "retorn",
+    #         "gelada",
+    #         "atcd",
+    #     ]
 
-        string = (
-            normalize("NFKD", string.lower()).encode("ascii", "ignore").decode("utf-8")
-        )
-        string = self.fix_volume(string)
-        string = self.fix_specifics_words(string)
-        string = self.fix_volume(string)
+    #     string = (
+    #         normalize("NFKD", string.lower()).encode("ascii", "ignore").decode("utf-8")
+    #     )
+    #     string = DistinctProductsTreated.fix_volume(string)
+    #     string = DistinctProductsTreated.fix_specifics_words(string)
+    #     string = DistinctProductsTreated.fix_volume(string)
 
-        list_string = [
-            abv_dict[word] if word in abv_dict.keys() else word
-            for word in string.split()
-        ]
-        list_string = [word for word in list_string if word not in stopw]
-        string = " ".join(list_string)
+    #     list_string = [
+    #         abv_dict[word] if word in abv_dict.keys() else word
+    #         for word in string.split()
+    #     ]
+    #     list_string = [word for word in list_string if word not in stopw]
+    #     string = " ".join(list_string)
 
-        return string
+    #     return string
 
     def text_treatment_dataframe(self, df, master):
+
         def add_ml(line):
             words = line.split()
             vol = [i for i in words if i in vols]
-            if len(vol) == 1:
+            if len(vol)==1:
                 value = vol[0]
-                return re.sub(value, value + "ml", line)
+                return re.sub(value, value+'ml', line)
             else:
                 return line
 
-        vols = [
-            i.volume_unit for i in master.select("volume_unit").distinct().collect()
-        ]
-        column_to_treat = "product_treated"
-        column_id = "id"
+        vols = [i.volume_unit for i in master.select('volume_unit').distinct().collect()]
+        column_to_treat = 'product_treated'
+        column_id = 'id'
 
         df = df.withColumn(column_id, monotonically_increasing_id())
-        df = df.fillna("")
+        df = df.fillna('')
 
         # Considera apenas palavras unicas na string
-        unique_word_string_udf = udf(unique_word_string, StringType())
+        unique_word_string_udf = udf(DistinctProductsTreated.unique_word_string, StringType())
         df = df.withColumn(column_to_treat, unique_word_string_udf(column_to_treat))
 
         # Remove codigos do texto, caracteres irrelevates, padroniza volume e passa para UTF-8
-        description_treatment_udf = udf(
-            lambda line: description_treatment(line), StringType()
-        )
-        df = df.withColumn(column_to_treat, description_treatment_udf(column_to_treat))
+        #description_treatment_udf = udf(lambda line: DistinctProductsTreated.description_treatment(line), StringType())
+        #description_treatment_udf = udf(DistinctProductsTreated.description_treatment, StringType())
+        df = df.withColumn(column_to_treat, description_udf(column_to_treat))
 
         # Adiciona ml em numeros que provavelmente sao volumes
         add_ml_udf = udf(lambda line: add_ml(line), StringType())
         df = df.withColumn(column_to_treat, add_ml_udf(column_to_treat))
 
         return df
+    
+    def process_description_column(self, df, column_name):
+        
+        #description_treatment_udf = udf(lambda line: DistinctProductsTreated.description_treatment(line), StringType())
+        df = df.withColumn(column_name, description_udf(column_name))
+
+        return df
+
+
+    # def process_column(self, df, column_name):
+    #     # Transformar a função Python comum em uma UDF do PySpark
+    #     unique_word_udf = udf(DistinctProductsTreated.unique_word_string, StringType())
+        
+    #     # Aplicar a UDF na coluna do DataFrame usando withColumn
+    #     df = df.withColumn('product_treated', unique_word_udf(df[column_name]))
+    #     return df
 
     def apply_transformation(self, df_distinct_products: DataFrame) -> DataFrame:
         fields = [
@@ -401,11 +498,11 @@ class DistinctProductsTreated(Transformation):
         ]
         df_distinct_treated = df_distinct_products.dropna(subset=colunas_para_verificar)
 
-        master = spark.read.table(
-            "brewdat_uc_saz_mlp_featurestore_dev.sales.cleansing_master_treated"
+        master = self.get_table(
+            "brewdat_uc_saz_mlp_featurestore_prod.sales.cleansing_master_treated"
         )
 
-        df_distinct_treated = self.create_column_product_treated(df_distinct_treated)
+        df_distinct_treated = self.create_column_product_treated(df_distinct_treated)        
         df_distinct_treated = self.text_treatment_dataframe(df_distinct_treated, master)
 
         return df_distinct_treated
@@ -421,6 +518,8 @@ class DistinctProductsTreated(Transformation):
 
         df_distinct_treated = self.apply_transformation(df_selected)
 
+        #df_distinct_products_treated = self.process_description_column(df_distinct_treated, 'product_treated')
+
         return df_distinct_treated
 
 # COMMAND ----------
@@ -435,26 +534,120 @@ df_distinct_products_treated.display()
 
 # COMMAND ----------
 
-df = apply_transformation(df_distinct_products)
+# from pyspark.sql.functions import udf
+# from pyspark.sql.types import StringType
+
+# class TextProcessor:
+#     def unique_word_string(self, text):
+#         if text is None:
+#             return ""
+
+#         ulist = []
+#         [ulist.append(x) for x in text.split(" ") if x not in ulist]
+#         return " ".join(ulist)
+
+#     def process_column(self, df, column_name):
+#         # Transformar a função Python comum em uma UDF do PySpark
+#         unique_word_udf = udf(self.unique_word_string, StringType())
+        
+#         # Aplicar a UDF na coluna do DataFrame usando withColumn
+#         df = df.withColumn('unique_words', unique_word_udf(df[column_name]))
+#         return df
+    
+#     def definitions(self):
+#         df = spark.createDataFrame([[1, "gato cachorro gato pássaro cachorro"], [2, "gato cachorro pássaro",]], ["int_column", "text_column"])
+
+#         df_final = self.process_column(df, 'text_column')
+
+#         return df_final
 
 # COMMAND ----------
 
-abv_dict
+# # Supondo que você tenha um DataFrame com uma coluna de texto chamada 'text_column'
+# df = spark.createDataFrame([[1, "gato cachorro gato pássaro cachorro"], [2, "gato cachorro pássaro",]], ["int_column", "text_column"])
+
+# # Criar uma instância da classe
+# processor = TextProcessor()
+
+# # Aplicar o método process_column ao DataFrame
+# df_processed = processor.process_column(df, 'text_column')
+
+# # Mostrar os resultados
+# df_processed.show(truncate=False)
 
 # COMMAND ----------
 
-import json
-def return_metadata(dataframe):
-  schema_json = dataframe.schema.json()
- 
-  schemas = json.loads(schema_json)
+# from pyspark.sql.functions import udf
+# from pyspark.sql.types import StringType
 
-  for schema in schemas['fields']:
-    print(f"- name: '{schema['name']}'\n  description: ''\n  type: '{schema['type']}'")
+# # Definir a função UDF fora da classe para evitar problemas de serialização
+# def unique_word_string(text):
+#     ulist = []
+#     [ulist.append(x) for x in text.split(" ") if x not in ulist]
+#     return " ".join(ulist)
+
+# # Registrar a UDF
+# unique_word_udf = udf(unique_word_string, StringType())
+
+# class TextProcessor:
+#     def process_column(self, df, column_name):
+#         # Aplicar a UDF na coluna do DataFrame usando withColumn
+#         df = df.withColumn('unique_words', unique_word_udf(df[column_name]))
+#         return df
+    
+#     def definitions(self):
+#         df = spark.createDataFrame([[1, "gato cachorro gato pássaro cachorro"], [2, "gato cavalo cachorro pássaro cavalo"]], ["int_column", "text_column"])
+
+#         df_final = self.process_column(df, 'text_column')
+
+#         return df_final
+
 
 # COMMAND ----------
 
-return_metadata(df_distinct_products_treated)
+processor = TextProcessor()
+
+df_final = processor.definitions()
+
+# COMMAND ----------
+
+df_final.display()
+
+# COMMAND ----------
+
+# from pyspark.sql.functions import udf
+# from pyspark.sql.types import StringType
+
+# class TextProcessor:
+#     @staticmethod
+#     def unique_word_string(text):
+#         ulist = []
+#         [ulist.append(x) for x in text.split(" ") if x not in ulist]
+#         return " ".join(ulist)
+
+#     def process_column(self, df, column_name):
+#         # Transformar a função Python comum em uma UDF do PySpark
+#         unique_word_udf = udf(TextProcessor.unique_word_string, StringType())
+        
+#         # Aplicar a UDF na coluna do DataFrame usando withColumn
+#         df = df.withColumn('unique_words', unique_word_udf(df[column_name]))
+#         return df
+    
+#     def definitions(self):
+#         df = spark.createDataFrame([[1, "gato cachorro gato pássaro cachorro"], [2, "gato cachorro pássaro"]], ["int_column", "text_column"])
+
+#         df_final = self.process_column(df, 'text_column')
+
+#         return df_final
+
+
+# COMMAND ----------
+
+# processor = TextProcessor()
+
+# df_final = processor.definitions()
+
+# df_final.display()
 
 # COMMAND ----------
 
