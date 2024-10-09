@@ -22,8 +22,93 @@ from datetime import datetime
 import random
 from unicodedata import normalize
 
-from pyspark.sql import types as T
+def fix_unity(string):
 
+    # 's/' -> sem 'c/' ou ' c ' -> com
+    string = re.sub("s/", " sem ", string)
+    string = re.sub("(c/|\sc\s)", " com ", string)
+    # 12x250 - 12 x 250
+    string = re.sub(r"\b(\d+)(x|\s+x)(\d+|\s+\d+)", r"\1unidade \3", string)
+    # 6un
+    string = re.sub(r"\b(\d+|\d+\s+)(un|unidad|unid|und)\b", r"\1unidade ", string)
+    # c6 - com 6 - cx6
+    # string = re.sub(r'\b(cx|c|cxc|com)(\s+\d+|\d+)(|un)\b',
+    string = re.sub(
+        r"\b(caixa|caixa com|cx|cxa)(\s+\d+|\d+)(|un)((\s+)(unidades?))?\b",  # PARA CORRIGIR PROBLEMA DOS PACKS
+        r"\2unidade ",
+        string,
+    )
+    # pack 3|6
+    # string = re.sub(r'\b(pack)(\s+)(\d+)', r'\3unidade', string)
+    string = re.sub(
+        r"(pack( de| com)?)(\s+)(\d+)((\s+)(unidades?))?", r"\4unidades", string
+    )  # PARA CORRIGIR PROBLEMA DOS PACKS
+    string = re.sub("sixpack|six pack", "6unidade", string)
+    string = re.sub("twelvepack|twelve pack", "12unidade", string)
+
+    return string
+    
+def fix_l(string):
+    pattern = (
+        r"(\d+)(,|\.|\s+|"
+        ")(\d+|"
+        ")(\s+|"
+        ")(lts|ltr|lt|lits|litros|litro|l)(\s+|$)"
+    )
+    find = re.search(pattern, string)
+    if find:
+        number = re.sub(pattern, r"\1.\3", find.group())
+        number = " " + str(int(float(number) * 1000)) + "ml "
+        string = re.sub(find.group(), number, string)
+    string = re.sub("litrao|litro", " 1000ml ", string)
+
+    return string
+    
+def fix_ml(string):
+    string = re.sub(r"(\d+)(\s+|" ")(ml|m)(\s+|$)", r" \1\3 ", string)
+    string = re.sub(r"(\d+)(m)(\s+|$)", r"\1ml ", string)
+
+    return string
+
+def fix_volume(string):
+    string = fix_unity(string)
+    string = fix_l(string)
+    string = fix_ml(string)
+
+    string = re.sub(r"\b(\d+)\s(unidade)", r"\1\2", string)
+    string = re.sub(r"0(\d+unidade)", r"\1", string)
+
+    return string
+
+def fix_specifics_words(string):
+    
+    string = re.sub("(transf.|transferencia|transf)\s+de\s+mesa\s+\d+", "", string)
+    string = re.sub(r"(beck's\b)|(beck( s|\b))", "becks", string)
+    string = re.sub(
+        "coca( [^c]|$)|com\s+cola|colacola|cola\s+cola|coca( |)cola",
+        "coca-cola",
+        string,
+    )
+    string = re.sub("refguarana", "refrigerante guarana", string)
+    string = re.sub("refpet", "refrigerante pet", string)
+    string = re.sub("serra(\s+|" ")(malte|malt|m )", "serramalte", string)
+    string = re.sub(r"#(.*)#", "", string)
+    string = re.sub("n/a|#\d+ |[^A-Za-z0-9|]+", " ", string)
+    string = re.sub("\s+(one|on|o)\s+(way|w)(\s+|$)", " ow ", string)
+    string = re.sub("oneway", "ow", string)
+    string = re.sub("(\s|^)(long neck|long nek|long n|l neck|l n )", " ln ", string)
+    string = re.sub("com gas", "comgas", string)
+    string = re.sub("sem gas", "semgas", string)
+    string = re.sub("sub zero", "subzero", string)
+    string = re.sub(r"\bjesus guarana\b", "guarana jesus", string)
+    string = re.sub(r"\bbrahma (chopp\b|chop\b)", "brahma", string)
+    string = re.sub(r"\bproibida pilsen\b", "proibida", string)
+    string = re.sub(r"antarcti\b", "antarctica", string)
+    string = re.sub(r"\b150 bpm\b", "150bpm", string)
+    string = re.sub(r"\bnao informado\b", "", string)
+    string = re.sub(r"\b(zer|zr)\b", "zero", string)
+
+    return string
 
 def description_treatment(string):
 
@@ -74,11 +159,6 @@ def description_treatment(string):
         "garrafa 300ml": ["litrinho"],
     }
 
-    # abv_dict = {}
-    # for k, v in crt_dict.items():
-    #     for x in v:
-    #         abv_dict[x] = k
-
     stopw = [
         "atac",
         "beb",
@@ -93,22 +173,25 @@ def description_treatment(string):
     # Inverter o dicionário para substituir abreviações
     abv_dict = {abbr: full for full, abbrs in crt_dict.items() for abbr in abbrs}
 
+    # Normalizar a string removendo acentuação
     string = normalize("NFKD", string.lower()).encode("ascii", "ignore").decode("utf-8")
-    #string = self.fix_volume(string)
-    #string = self.fix_specifics_words(string)
-    #string = self.fix_volume(string)
+    string = fix_volume(string)
+    string = fix_specifics_words(string)
+    string = fix_volume(string)
 
+    # Separar as palavras e substituir abreviações
     list_string = [
         abv_dict[word] if word in abv_dict.keys() else word for word in string.split()
     ]
     
+    # Remover palavras irrelevantes
     list_string = [word for word in list_string if word not in stopw]
     string = " ".join(list_string)
 
     return string
 
-# Criar a UDF
-description_udf = udf(description_treatment, StringType())
+# Cria a UDF description_treatment_udf
+description_treatment_udf = udf(description_treatment, StringType())
 
 # Main class for your transformation
 class DistinctProductsTreated(Transformation):
@@ -247,183 +330,6 @@ class DistinctProductsTreated(Transformation):
 
         return df
 
-    @staticmethod
-    def fix_unity(string):
-
-        # 's/' -> sem 'c/' ou ' c ' -> com
-        string = re.sub("s/", " sem ", string)
-        string = re.sub("(c/|\sc\s)", " com ", string)
-        # 12x250 - 12 x 250
-        string = re.sub(r"\b(\d+)(x|\s+x)(\d+|\s+\d+)", r"\1unidade \3", string)
-        # 6un
-        string = re.sub(r"\b(\d+|\d+\s+)(un|unidad|unid|und)\b", r"\1unidade ", string)
-        # c6 - com 6 - cx6
-        # string = re.sub(r'\b(cx|c|cxc|com)(\s+\d+|\d+)(|un)\b',
-        string = re.sub(
-            r"\b(caixa|caixa com|cx|cxa)(\s+\d+|\d+)(|un)((\s+)(unidades?))?\b",  # PARA CORRIGIR PROBLEMA DOS PACKS
-            r"\2unidade ",
-            string,
-        )
-        # pack 3|6
-        # string = re.sub(r'\b(pack)(\s+)(\d+)', r'\3unidade', string)
-        string = re.sub(
-            r"(pack( de| com)?)(\s+)(\d+)((\s+)(unidades?))?", r"\4unidades", string
-        )  # PARA CORRIGIR PROBLEMA DOS PACKS
-        string = re.sub("sixpack|six pack", "6unidade", string)
-        string = re.sub("twelvepack|twelve pack", "12unidade", string)
-
-        return string
-    
-    @staticmethod
-    def fix_l(string):
-        pattern = (
-            r"(\d+)(,|\.|\s+|"
-            ")(\d+|"
-            ")(\s+|"
-            ")(lts|ltr|lt|lits|litros|litro|l)(\s+|$)"
-        )
-        find = re.search(pattern, string)
-        if find:
-            number = re.sub(pattern, r"\1.\3", find.group())
-            number = " " + str(int(float(number) * 1000)) + "ml "
-            string = re.sub(find.group(), number, string)
-        string = re.sub("litrao|litro", " 1000ml ", string)
-
-        return string
-    
-    @staticmethod
-    def fix_ml(string):
-        string = re.sub(r"(\d+)(\s+|" ")(ml|m)(\s+|$)", r" \1\3 ", string)
-        string = re.sub(r"(\d+)(m)(\s+|$)", r"\1ml ", string)
-
-        return string
-
-    @staticmethod
-    def fix_volume(string):
-        string = DistinctProductsTreated.fix_unity(string)
-        string = DistinctProductsTreated.fix_l(string)
-        string = DistinctProductsTreated.fix_ml(string)
-
-        string = re.sub(r"\b(\d+)\s(unidade)", r"\1\2", string)
-        string = re.sub(r"0(\d+unidade)", r"\1", string)
-
-        return string
-
-    ###############################################################################
-    @staticmethod
-    def fix_specifics_words(string):
-        string = re.sub("(transf.|transferencia|transf)\s+de\s+mesa\s+\d+", "", string)
-        string = re.sub(r"(beck's\b)|(beck( s|\b))", "becks", string)
-        string = re.sub(
-            "coca( [^c]|$)|com\s+cola|colacola|cola\s+cola|coca( |)cola",
-            "coca-cola",
-            string,
-        )
-        string = re.sub("refguarana", "refrigerante guarana", string)
-        string = re.sub("refpet", "refrigerante pet", string)
-        string = re.sub("serra(\s+|" ")(malte|malt|m )", "serramalte", string)
-        string = re.sub(r"#(.*)#", "", string)
-        string = re.sub("n/a|#\d+ |[^A-Za-z0-9|]+", " ", string)
-        string = re.sub("\s+(one|on|o)\s+(way|w)(\s+|$)", " ow ", string)
-        string = re.sub("oneway", "ow", string)
-        string = re.sub("(\s|^)(long neck|long nek|long n|l neck|l n )", " ln ", string)
-        string = re.sub("com gas", "comgas", string)
-        string = re.sub("sem gas", "semgas", string)
-        string = re.sub("sub zero", "subzero", string)
-        string = re.sub(r"\bjesus guarana\b", "guarana jesus", string)
-        string = re.sub(r"\bbrahma (chopp\b|chop\b)", "brahma", string)
-        string = re.sub(r"\bproibida pilsen\b", "proibida", string)
-        string = re.sub(r"antarcti\b", "antarctica", string)
-        string = re.sub(r"\b150 bpm\b", "150bpm", string)
-        string = re.sub(r"\bnao informado\b", "", string)
-        string = re.sub(r"\b(zer|zr)\b", "zero", string)
-
-        return string
-
-    # @staticmethod
-    # def description_treatment(string):
-
-    #     crt_dict = {
-    #         "refrigerante": ["refri", "refrig", "refr", "ref", "refriger"],
-    #         "cerveja": ["cerv", "cervej", "cer", "cerve"],
-    #         "chopp": [
-    #             "chop",
-    #         ],
-    #         "tonica": ["ton", "tonic"],
-    #         "itaipava": ["itpv", "itaip"],
-    #         "do bem": ["db"],
-    #         "h2oh": ["h2o", "h20h", "h20"],
-    #         "antarctica": [
-    #             "antartica",
-    #             "ant",
-    #             "antar",
-    #             "antart",
-    #             "antartc",
-    #             "antarct",
-    #             "antarctic",
-    #             "antarc",
-    #             "antartic",
-    #         ],
-    #         "schweppes": ["schw"],
-    #         "guarana": ["guar", "guara", "guarah"],
-    #         "heineken": ["heinek"],
-    #         "laranja": ["lar", "laran", "lja"],
-    #         "limao": ["lim"],
-    #         "maCZbier": ["maCZebier", "maCZ", "malizbier", "maCZb"],
-    #         "pilsen": ["pil", "pils"],
-    #         "budweiser": ["bud", "budweis"],
-    #         "alcool": ["alc"],
-    #         "brahma": ["brama", "ahma"],
-    #         "original": ["orig", "origina", "origin", "ori"],
-    #         "agua": ["ag"],
-    #         "coca cola": ["cocacola"],
-    #         "pepsi": ["pespi"],
-    #         "sprite": ["sprit"],
-    #         "mineral": ["min"],
-    #         "stella": ["stela"],
-    #         "caixa": ["cx", "cxa"],
-    #         "unidade": ["un", "uni", "unidad", "und"],
-    #         "lt": ["lata", "latao", "latagelada", "latas", "lat", "lta"],
-    #         "garrafa": ["gf", "gfa", "grfa", "grf"],
-    #         "ln": ["lneck", "longnec", "lnk", "long", "lon"],
-    #         "zero": ["0,0", "0 alcool", "sacucar", "menos acucar"],
-    #         "puro malte": ["pmalte"],
-    #         "senses": ["sense", "sens"],
-    #         "garrafa 300ml": ["litrinho"],
-    #     }
-
-    #     abv_dict = {}
-    #     for k, v in crt_dict.items():
-    #         for x in v:
-    #             abv_dict[x] = k
-
-    #     stopw = [
-    #         "atac",
-    #         "beb",
-    #         "irrelevante",
-    #         "cl",
-    #         "retornavel",
-    #         "retorn",
-    #         "gelada",
-    #         "atcd",
-    #     ]
-
-    #     string = (
-    #         normalize("NFKD", string.lower()).encode("ascii", "ignore").decode("utf-8")
-    #     )
-    #     string = DistinctProductsTreated.fix_volume(string)
-    #     string = DistinctProductsTreated.fix_specifics_words(string)
-    #     string = DistinctProductsTreated.fix_volume(string)
-
-    #     list_string = [
-    #         abv_dict[word] if word in abv_dict.keys() else word
-    #         for word in string.split()
-    #     ]
-    #     list_string = [word for word in list_string if word not in stopw]
-    #     string = " ".join(list_string)
-
-    #     return string
-
     def text_treatment_dataframe(self, df, master):
 
         def add_ml(line):
@@ -446,32 +352,14 @@ class DistinctProductsTreated(Transformation):
         unique_word_string_udf = udf(DistinctProductsTreated.unique_word_string, StringType())
         df = df.withColumn(column_to_treat, unique_word_string_udf(column_to_treat))
 
-        # Remove codigos do texto, caracteres irrelevates, padroniza volume e passa para UTF-8
-        #description_treatment_udf = udf(lambda line: DistinctProductsTreated.description_treatment(line), StringType())
-        #description_treatment_udf = udf(DistinctProductsTreated.description_treatment, StringType())
-        df = df.withColumn(column_to_treat, description_udf(column_to_treat))
+        # Remove codigos do texto, caracteres irrelevates, padroniza volume e passa para UTF-8     
+        df = df.withColumn(column_to_treat, description_treatment_udf(column_to_treat))
 
         # Adiciona ml em numeros que provavelmente sao volumes
         add_ml_udf = udf(lambda line: add_ml(line), StringType())
         df = df.withColumn(column_to_treat, add_ml_udf(column_to_treat))
-
-        return df
-    
-    def process_description_column(self, df, column_name):
         
-        #description_treatment_udf = udf(lambda line: DistinctProductsTreated.description_treatment(line), StringType())
-        df = df.withColumn(column_name, description_udf(column_name))
-
         return df
-
-
-    # def process_column(self, df, column_name):
-    #     # Transformar a função Python comum em uma UDF do PySpark
-    #     unique_word_udf = udf(DistinctProductsTreated.unique_word_string, StringType())
-        
-    #     # Aplicar a UDF na coluna do DataFrame usando withColumn
-    #     df = df.withColumn('product_treated', unique_word_udf(df[column_name]))
-    #     return df
 
     def apply_transformation(self, df_distinct_products: DataFrame) -> DataFrame:
         fields = [
@@ -517,8 +405,6 @@ class DistinctProductsTreated(Transformation):
         df_selected = self.select_columns_distinct_products(df_transformed)
 
         df_distinct_treated = self.apply_transformation(df_selected)
-
-        #df_distinct_products_treated = self.process_description_column(df_distinct_treated, 'product_treated')
 
         return df_distinct_treated
 
