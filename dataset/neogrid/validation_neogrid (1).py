@@ -7,6 +7,7 @@
 # MAGIC %sql
 # MAGIC SELECT year, month, day, source_file,  count(*) count_rows
 # MAGIC FROM  brewdat_uc_saz_prod.slv_saz_sales_neogrid.br_sellout slv
+# MAGIC WHERE year = 2024 and month = 10 and day = 14
 # MAGIC GROUP BY year, month, day, source_file
 # MAGIC ORDER BY year, month, day, source_file
 # MAGIC

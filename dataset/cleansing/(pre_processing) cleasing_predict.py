@@ -8,12 +8,9 @@ from pyspark.sql import functions as F
 from pyspark.sql import types as T
 from pyspark.sql.types import *
 from pyspark.sql.types import StringType
-from pyspark.sql.functions import (col, concat, explode, lit, pandas_udf, round, when)
+from pyspark.sql.functions import (col, concat, explode, lit, pandas_udf, round, udf, when)
 
 import difflib
-
-from pyspark.sql import SparkSession
-import pandas as pd
 
 spark.conf.set('spark.sql.execution.arrow.enabled', 'false')
 
@@ -24,6 +21,7 @@ class CleasingPredict(Transformation): #
             dependencies = [
             ]
         )
+        
         self.master_words = []
 
     def drop_columns(self, df, list_columns):
@@ -123,7 +121,9 @@ class CleasingPredict(Transformation): #
     def process_master_treated(self):
 
         table_name = "brewdat_uc_saz_mlp_featurestore_prod.sales.cleansing_master_treated"  
-        df_master_treated = self.get_table(table_name)        
+        df_master_treated = self.get_table(table_name)
+
+        df_master_treated = self.drop_columns(df_master_treated, ['brand_description',  'number_description'])
 
         return df_master_treated
     
@@ -365,21 +365,6 @@ class CleasingPredict(Transformation): #
         
         return df_direct_match
     
-    def pre_process_master_treated(self, df_master_treated):
-        """colunas_master = ['product_description', 
-                  'product_description_treated', 
-                  'category', 
-                  'brand_id', 
-                  'family', 
-                  'volume_unit', 
-                  'pack_quantity', 
-                  'package_unit']
-
-        df_master_treated = df_master_treated.select(colunas_master)"""
-        df_master_treated = df_master_treated.dropDuplicates(['product_description_treated'])
-
-        return df_master_treated
-
     def add_unidade(self, df):
         """
             Adiciona '1unidade' ao fim das descrições sem informação de unidade
@@ -393,6 +378,26 @@ class CleasingPredict(Transformation): #
             )
         
         return df
+    
+    def pre_process_master_treated(self, df_master_treated):
+        """colunas_master = ['product_description', 
+                  'product_description_treated', 
+                  'category', 
+                  'brand_id', 
+                  'family', 
+                  'volume_unit', 
+                  'pack_quantity', 
+                  'package_unit']
+
+        df_master_treated = df_master_treated.select(colunas_master)"""
+        df_master_treated = df_master_treated.dropDuplicates(['product_description_treated'])
+
+        # Adiciona '1unidade' ao fim das descrições sem informação de unidade
+        df_master_treated = self.add_unidade(df_master_treated)
+
+        return df_master_treated
+
+    
     
     def create_list_of_words(self, master):
         """
@@ -413,30 +418,19 @@ class CleasingPredict(Transformation): #
         master_words = list(set(master_words))
         return master_words
     
-    def load_master_words(self, df_master_treated):
+    def fix_typo(self, text):
 
-        # Adiciona '1unidade' ao fim das descrições sem informação de unidade
-        df_master_treated = self.add_unidade(df_master_treated)
-
-        # Cria lista de palavras presentes na master
-        self.master_words = self.create_list_of_words(df_master_treated)
-    
-    def fix_typo(self, text, master_words):
-        """
-            Corrige erros de digitação e normaliza palavras. 
-            Usa como base a lista de palavras presentes na master (master_words)
-        """
         if not text:
             return None  # Verifica se o texto é None ou vazio
-
+        
         words_list = text.split(' ')
         final_text = list()
         for word in words_list:
-            if word in master_words or 'ml' in word or all(map(str.isdigit, word)):
+            if word in self.master_words or 'ml' in word or all(map(str.isdigit, word)):
                 final_text.append(word + ' ')
             else:
                 try:
-                    matched_word = difflib.get_close_matches(word, master_words, 1, cutoff=0.90)[0]
+                    matched_word = difflib.get_close_matches(word, self.master_words, 1, cutoff=0.90)[0]
                     final_text.append(matched_word + ' ')
                 except:
                     pass
@@ -445,7 +439,6 @@ class CleasingPredict(Transformation): #
         final_text = final_text.strip()
         return final_text
     
-    #@udf(T.StringType())
     @staticmethod
     def create_number_data(text):
         """
@@ -458,9 +451,8 @@ class CleasingPredict(Transformation): #
         text = [word for word in text.split() if regexp.search(word) or word in packages]
         text = ' '.join(text)
             
-        return text.strip()    
+        return text.strip()
     
-    #@udf(T.StringType())
     @staticmethod
     def create_brand_data(text):
         """
@@ -470,49 +462,52 @@ class CleasingPredict(Transformation): #
         text = ' '.join(text)
     
         return text.strip()
-
-
     
-    def transform_data(self, df_master_treated, df_distinct_treated_cleasing):
+    def load_master_words(self, df, column_name):
+        """
+        Carrega a lista de palavras mestre a partir de um DataFrame PySpark.
+        :param df: DataFrame PySpark que contém a coluna de palavras mestre
+        :param column_name: Nome da coluna contendo as palavras mestre
+        """
+        # Coletar as palavras da coluna e armazená-las como uma lista em master_words
+        self.master_words = self.create_list_of_words(df)
         
+        # df.select(column_name).rdd.flatMap(lambda x: x).collect()
+    
+    def transform_data(self, df_master_treated, df_distinct_treated_cleasing):        
 
-        # Corrige possíveis erros de digitação, usando como base a lista de palavras da Master
-        #fix_typo_udf = F.udf(CleasingPredict.fix_typo, StringType())
+        # Cria lista de palavras presentes na master
+        master_words = self.create_list_of_words(df_master_treated)
 
-        # col_input = 'product_description_treated'
-        # col_output = 'product_treated'
+        # self.master_words = self.create_list_of_words(df_master_treated)
 
-        # df_distinct_treated_cleasing = (
-        #      df_distinct_treated_cleasing.withColumn(col_input, fix_typo_udf(F.col(col_output), master_words))
-        # )
+        # Conserta possíveis erros de digitação, usando como base a lista de palavras da Master
+        # df_distinct_treated_cleasing = df_distinct_treated_cleasing.withColumn('product_description_treated', self.fix_typo('product_treated'))
 
+
+        # Função UDF para aplicar a correção
+        # fix_typo_udf = F.udf(self.fix_typo, StringType())
+        
         # df_distinct_treated_cleasing = (
         #     df_distinct_treated_cleasing
-        #         .withColumn('product_description_treated', 
-        #                     self.fix_typo(df_distinct_treated_cleasing.product_treated, 
-        #                                   master_words))
+        #         .withColumn('product_description_treated', fix_typo_udf(F.col('product_treated')))
         # )
 
         # Adiciona '1unidade' ao fim das descrições sem informação de unidade
-        #df_distinct_treated_cleasing = add_unidade(df_distinct_treated_cleasing)
+        #df_distinct_treated_cleasing = self.add_unidade(df_distinct_treated_cleasing)
 
-        # Cria descrições só com informação importantes para Volume e Quantidade (number_description) 
-        # df_distinct_treated_cleasing = (
-        #     df_distinct_treated_cleasing
-        #         .withColumn('number_description', 
-        #                     CleasingPredict.create_number_data('product_description_treated')
-        #                 )
-        #     )
+        # # Cria descrições só com informação importantes para Volume e Quantidade (number_description) 
+        # df_distinct_treated_cleasing = df_distinct_treated_cleasing.withColumn('number_description', create_number_data('product_description_treated'))
 
-        # Cria descrições só com informação importantes para Marca, Familia e Categoria (brand_description) 
+        # # Cria descrições só com informação importantes para Marca, Familia e Categoria (brand_description) 
         # df_input = (
-        #     df_distinct_treated_cleasing
-        #         .withColumn('brand_description', 
-        #                     CleasingPredict.create_brand_data('product_description_treated'))
-        #         .drop('brand_id')
-        #     )
+        # df_distinct_treated_cleasing
+        #     .withColumn('brand_description', 
+        #                 create_brand_data('product_description_treated'))
+        #     .drop('brand_id')
+        # )
 
-        return master_words
+        return df_master_treated
 
     # This method is mandatory and the final transformation of your dataframe must be returned here
     def definitions(self):
@@ -649,32 +644,30 @@ class CleasingPredict(Transformation): #
                 select_columns, 
                 join_keys)
             )
-        # end direct match
+        # end direct match        
 
         df_master_treated = self.pre_process_master_treated(df_master_treated)
 
-        self.load_master_words(df_master_treated)
+        #self.load_master_words(df_master_treated, 'product_description_treated')
 
-        master_words  = self.transform_data(df_master_treated, df_distinct_treated_cleasing)
+        # df_distinct_treated_cleasing  = self.transform_data(df_master_treated, df_distinct_treated_cleasing)
 
-        return df_master_treated, df_distinct_treated_cleasing
+        return df_distinct_treated_cleasing, df_master_treated
 
 # COMMAND ----------
 
 cleasing_predict = CleasingPredict()
 
-df_master_treated, df_distinct_treated_cleasing = cleasing_predict.definitions()
-
-cleasing_predict.master_words
-
-# COMMAND ----------
-
-df_distinct_treated_cleasing.display()
+df_distinct_treated_cleasing, df_master_treated = cleasing_predict.definitions()
 
 # COMMAND ----------
 
 # MAGIC %md
-# MAGIC # Functions
+# MAGIC # DistinctTreatedCleansing
+
+# COMMAND ----------
+
+
 
 # COMMAND ----------
 
@@ -688,10 +681,36 @@ from pyspark.sql import functions as F
 from pyspark.sql.types import StringType
 
 class TypoCorrector:
-    def __init__(self, master_words):
-        # Lista de palavras de referência para correção
-        self.master_words = master_words
+    def __init__(self):
+        self.master_words = []
 
+    def extract(self):
+
+        data = [['brahma malzebier ln']
+        ,['cerveja brahma garrafa 300ml 300ml unidade']
+        ,['brahma 600ml apenas o liquido']
+        ,['pack cerveja brahma malzbier ln 6unidade 355ml']
+        ,['brahma super']
+        ,['refrigerante cerveja brahma d malte 600000ml mapa 0089803']
+        ,['cerveja brahma zero alcool ln 355ml']
+        ,['cerveja brahma extra lager lt 350ml l12p8']
+        ,['caixa brahma zero 350ml com 12 unidade']
+        ,['pack brahma duplo malte 350ml']
+        ,['cerveja brahma duplo malte 350ml']
+        ,['brahma 600ml']
+        ,['brahma zero lt 350ml']
+        ,['cerveja brahma duplo malte 269ml']
+        ,['cerveja brahma duplo malte garrafa ret 600ml 24unidade']
+        ,['brahma pilsen buchudinha 300ml']
+        ,['brahma duplo malte 300ml']
+        ,['caixa brahma duplo malte 269ml com 15unidade']
+        ,['garrafao brahma 1000ml unidade']
+        ,['brahma duplo malte 1000ml']]
+
+        df = spark.createDataFrame(data, ['product_description_treated'])
+
+        return df     
+    
     def create_list_of_words(self, master):
         """
             Cria a lista de palavras da master, alem de adicionar algumas palavras chave
@@ -711,57 +730,18 @@ class TypoCorrector:
         master_words = list(set(master_words))
         return master_words
 
-    def fix_typo(self, text):
+    def load_master_words(self, df, column_name):
         """
-        Corrige erros de digitação e normaliza palavras.
-        Usa como base a lista de palavras presentes na master (self.master_words)
+        Carrega a lista de palavras mestre a partir de um DataFrame PySpark.
+        :param df: DataFrame PySpark que contém a coluna de palavras mestre
+        :param column_name: Nome da coluna contendo as palavras mestre
         """
-        if not text:
-            return None  # Verifica se o texto é None ou vazio
+        # Coletar as palavras da coluna e armazená-las como uma lista em master_words
+        self.master_words = self.create_list_of_words(df)
         
-        words_list = text.split(' ')
-        final_text = []
-        
-        for word in words_list:
-            if word in self.master_words or 'ml' in word or word.isdigit():
-                final_text.append(word)
-            else:
-                try:
-                    matched_word = difflib.get_close_matches(word, self.master_words, 1, cutoff=0.90)
-                    if matched_word:
-                        final_text.append(matched_word[0])
-                    else:
-                        final_text.append(word)  # Caso não encontre correspondência, mantém a palavra original
-                except:
-                    final_text.append(word)  # Adiciona a palavra original em caso de erro
-        
-        return ' '.join(final_text)
-    
-    def fix_typo_old(self, df, text):
-        """
-            Corrige erros de digitação e normaliza palavras. 
-            Usa como base a lista de palavras presentes na master (master_words)
-        """
+        # df.select(column_name).rdd.flatMap(lambda x: x).collect()
 
-        master_words = self.create_list_of_words(df)
-
-        words_list = text.split(' ')
-        final_text = list()
-        for word in words_list:
-            if word in master_words or 'ml' in word or all(map(str.isdigit, word)):
-                final_text.append(word + ' ')
-            else:
-                try:
-                    matched_word = difflib.get_close_matches(word, master_words, 1, cutoff=0.90)[0]
-                    final_text.append(matched_word + ' ')
-                except:
-                    pass
-                    
-        final_text = ''.join(final_text)
-        final_text = final_text.strip()
-        return final_text
-
-    def correct_column(self, df, df_master, input_col, output_col):
+    def correct_column(self, df, input_col, output_col):
         """
         Aplica a correção de erros de digitação em uma coluna de um DataFrame PySpark
         :param df: DataFrame PySpark
@@ -771,36 +751,94 @@ class TypoCorrector:
         """
         # Função UDF para aplicar a correção
         fix_typo_udf = F.udf(self.fix_typo, StringType())
-        fix_typo_udf_old = F.udf(self.fix_typo_old, StringType())
         
         # Aplicar a função de correção à coluna especificada
-        return df.withColumn(output_col, fix_typo_udf_old(F.col(input_col), df_master))
+        return df.withColumn(output_col, fix_typo_udf(F.col(input_col)))
+    
+    def definitions(self):
+        df_master = self.extract()
+        df_distinct = self.extract()
+
+        self.load_master_words(df_master, 'product_description_treated')
+
+        df_corrigido = self.correct_column(df_distinct, 'product_description_treated', 'product_treated')
+
+        return df_master
+
+
+
 
 # Exemplo de uso:
-# Criar a lista de palavras mestre
-# master_words = ['pyspark', 'dataframe', 'correction', 'error', 'model', 'ml']
+# Supondo que 'df_palavras_mestre' seja um DataFrame PySpark com uma coluna 'master_column' contendo as palavras mestre
 
 # Criar a instância da classe
-# typo_corrector = TypoCorrector(master_words)
+typo_corrector = TypoCorrector()
 
-# # Supondo que 'df' seja seu DataFrame PySpark com uma coluna chamada 'text_column'
-# df_corrigido = typo_corrector.correct_column(df, 'product_treated', 'product_description_treated')
+# Carregar as palavras mestre do DataFrame
+typo_corrector.load_master_words(df_master_treated, 'product_description_treated')
 
-# # Mostrar o resultado
-# df_corrigido.show()
+# Supondo que 'df' seja seu DataFrame PySpark com uma coluna chamada 'text_column'
+df_corrigido = typo_corrector.correct_column(df_distinct_treated_cleasing, 'product_treated', 'product_description_treated')
+
 
 
 
 # COMMAND ----------
 
 # Criar a instância da classe
-typo_corrector = TypoCorrector(master_words)
+typo_corrector = TypoCorrector()
+
+# COMMAND ----------
+
+# Extract dataframes
+df_master_treated = typo_corrector.extract()
+df_distinct_treated_cleasing = typo_corrector.extract()
+
+df_distinct_treated_cleasing = df_distinct_treated_cleasing.withColumnRenamed('product_description_treated', 'product_treated')
+
+# Load master words on the driver node
+typo_corrector.load_master_words(df_master_treated, 'product_description_treated')
+
+# Correct column on the driver node
+df_corrigido = typo_corrector.correct_column(
+    df_distinct_treated_cleasing,
+    'product_treated',
+    'product_description_treated'
+)
+
+# Display the corrected dataframe
+display(df_corrigido)
+
+# COMMAND ----------
+
+df_distinct_treated_cleasing.display()
+
+# COMMAND ----------
+
+df_master_treated = typo_corrector.extract()
+df_distinct_treated_cleasing = typo_corrector.extract()
+
+# Carregar as palavras mestre do DataFrame
+typo_corrector.load_master_words(df_master_treated, 'product_description_treated')
 
 # Supondo que 'df' seja seu DataFrame PySpark com uma coluna chamada 'text_column'
-df_corrigido = typo_corrector.correct_column(df_distinct_treated_cleasing, df_master_treated, 'product_treated', 'product_description_treated')
+df_corrigido = typo_corrector.correct_column(df_distinct_treated_cleasing, 'product_treated', 'product_description_treated')
+
+# COMMAND ----------
+
+# Criar a instância da classe
+typo_corrector = TypoCorrector()
+
+df_corrigido = typo_corrector.definitions()
+
+# COMMAND ----------
+
+type(df_corrigido)
+
+# COMMAND ----------
 
 # Mostrar o resultado
-# df_corrigido.show()
+df_corrigido.display()
 
 
 # COMMAND ----------
@@ -809,4 +847,24 @@ df_corrigido.display()
 
 # COMMAND ----------
 
-
+product_treated
+brahma 600ml apenas o liquido
+brahma malzebier ln
+cerveja brahma garrafa 300ml 300ml unidade
+pack cerveja brahma malzbier ln 6unidade 355ml
+brahma super
+refrigerante cerveja brahma d malte 600000ml mapa 0089803
+cerveja brahma zero alcool ln 355ml
+cerveja brahma extra lager lt 350ml l12p8
+caixa brahma zero 350ml com 12 unidade
+pack brahma duplo malte 350ml
+cerveja brahma duplo malte 350ml
+brahma 600ml
+brahma zero lt 350ml
+cerveja brahma duplo malte 269ml
+cerveja brahma duplo malte garrafa ret 600ml 24unidade
+brahma pilsen buchudinha 300ml
+brahma duplo malte 300ml
+caixa brahma duplo malte 269ml com 15unidade
+garrafao brahma 1000ml unidade
+brahma duplo malte 1000ml
