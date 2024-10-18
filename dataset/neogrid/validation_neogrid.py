@@ -7,10 +7,18 @@
 # MAGIC %sql
 # MAGIC SELECT year, month, day, source_file,  count(*) count_rows
 # MAGIC FROM  brewdat_uc_saz_prod.slv_saz_sales_neogrid.br_sellout slv
-# MAGIC WHERE year = 2024 and month = 10 and day = 14
+# MAGIC WHERE 1=1
+# MAGIC --AND year = 2024 and month = 10 and day = 14
 # MAGIC GROUP BY year, month, day, source_file
 # MAGIC ORDER BY year, month, day, source_file
 # MAGIC
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC SELECT to_date(concat_ws('-', year, month, day)) as ingestion_date, count(*) count_rows
+# MAGIC FROM  brewdat_uc_saz_prod.slv_saz_sales_neogrid.br_sellout
+# MAGIC GROUP BY to_date(concat_ws('-', year, month, day))
 
 # COMMAND ----------
 
@@ -68,3 +76,39 @@
 
 # MAGIC %sql
 # MAGIC SELECT * FROM brewdat_uc_saz_prod.gld_saz_sales_neogrid.pre_sellout
+
+# COMMAND ----------
+
+# MAGIC %md 
+# MAGIC # Neogrid (Dev)
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC SELECT
+# MAGIC   count(*) count_rows,
+# MAGIC   (
+# MAGIC     SELECT
+# MAGIC       count(*) count_rows
+# MAGIC     FROM
+# MAGIC       brewdat_uc_saz_dev.slv_saz_sales_neogrid.br_sellout
+# MAGIC   ) count_rows_total,
+# MAGIC   source_file
+# MAGIC FROM
+# MAGIC   brewdat_uc_saz_dev.slv_saz_sales_neogrid.br_sellout
+# MAGIC GROUP BY
+# MAGIC   source_file
+
+# COMMAND ----------
+
+# MAGIC %sql
+# MAGIC SELECT unb, start_date, end_date
+# MAGIC FROM brewdat_uc_saz_prod.gld_saz_sales_promax.nota_fiscal_cdd_union
+
+# COMMAND ----------
+
+dbutils.fs.ls("abfss://gold@brewdatsazgldp.dfs.core.windows.net/data/saz/br/sales/sellout/neogrid/gld_saz_sales_neogrid/sellout/DIA=2024-06-12")
+
+# COMMAND ----------
+
+

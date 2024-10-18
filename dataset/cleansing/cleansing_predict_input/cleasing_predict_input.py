@@ -1057,17 +1057,21 @@ class CleansingPredictInput(Transformation):  #
             df_master_treated, df_distinct_treated_cleansing
         )
 
-        return df_distinct_treated_cleansing
+        return df_distinct_treated_cleansing, df_direct_match
 
 # COMMAND ----------
 
 cleansing_predict = CleansingPredictInput()
 
-df_distinct_treated_cleansing = cleansing_predict.definitions()
+df_distinct_treated_cleansing, df_direct_match = cleansing_predict.definitions()
 
 # COMMAND ----------
 
 df_distinct_treated_cleansing.count()
+
+# COMMAND ----------
+
+df_direct_match.count()
 
 # COMMAND ----------
 

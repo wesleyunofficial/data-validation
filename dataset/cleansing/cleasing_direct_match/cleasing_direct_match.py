@@ -694,10 +694,6 @@ cleasing_direct_match = CleansingDirectMatch()
 
 # COMMAND ----------
 
-
-
-# COMMAND ----------
-
 df_direct_match = cleasing_direct_match.definitions()
 
 # COMMAND ----------

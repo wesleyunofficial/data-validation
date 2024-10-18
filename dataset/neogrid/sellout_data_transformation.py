@@ -39,15 +39,15 @@ class Sellout(Transformation):
         current_datetime = datetime.now(tz=time_zone)
         return current_datetime
 
-    def is_first_execution_by_date(self, current_datetime) -> bool:
+    def is_first_execution_by_date(self) -> bool:
         """
             Check if is the first_execution verifing if dates are equals.
         Returnes:
             _type_: bool
         """
-        dates = [date(2024, 7, 29), date(2024, 7, 30), date(2024, 7, 31)]
+        dates = [date(2024, 10, 8), date(2024, 10, 17), date(2024, 10, 18)]
 
-        if current_datetime.date() in dates:
+        if self.reference_date.date() in dates:
             return True
         else:
             return False
@@ -83,9 +83,11 @@ class Sellout(Transformation):
         if is_first_execution:
             return df_neogrid_sellout
         else:
+            current_date = current_datetime.date() - timedelta(days=7)
+            
             # Otherwise, filter the DataFrame by 'ingestion_date'
             df_neogrid_sellout = df_neogrid_sellout.where(
-                df_neogrid_sellout.ingestion_date == current_date
+                df_neogrid_sellout.ingestion_date >= current_date
             )
 
             return df_neogrid_sellout
@@ -230,7 +232,7 @@ class Sellout(Transformation):
 
         current_datetime = self.get_datetime()
 
-        is_first_execution = self.is_first_execution_by_date(current_datetime)
+        is_first_execution = self.is_first_execution_by_date()
 
         if is_first_execution:
 
